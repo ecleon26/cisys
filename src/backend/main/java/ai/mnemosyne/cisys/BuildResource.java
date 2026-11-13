@@ -25,6 +25,7 @@ public class BuildResource {
  @Inject BuildRunner runner;
  @Inject BuildLogs logs;
  @Inject RepositoryUrlValidator repositoryUrls;
+ @Inject ProjectAccess access;
  /** The image and the commands come from the branch's {@value Workflow#PATH}. */
  public record RunRequest(String branch, String credentialRef) {}
  /** Who requested the build and the credential reference are returned to admins only; the workflow file only for a single build. */
@@ -82,6 +83,14 @@ public class BuildResource {
   Build b=Build.findById(buildId);if(b==null || !id.equals(b.projectId))throw new NotFoundException();
   b.pinned=pinned;
   return response(b,true);
+ }
+ /** Admins, the project's owner and whoever requested the build may cancel it. */
+ @POST @Path("/{buildId}/cancel") public BuildResponse cancel(@PathParam("projectId") Long id,@PathParam("buildId") Long buildId) {
+  Project p=visible(id);
+  Build b=Build.findById(buildId);if(b==null || !id.equals(b.projectId))throw new NotFoundException();
+  if(!access.mayCancel(p,b))throw new ForbiddenException();
+  if(!runner.cancel(buildId))throw new WebApplicationException(jakarta.ws.rs.core.Response.status(409).type(MediaType.APPLICATION_JSON).entity(java.util.Map.of("error","The build has already finished.")).build());
+  return response(io.quarkus.narayana.jta.QuarkusTransaction.requiringNew().call(()->Build.<Build>findById(buildId)),true);
  }
  @POST public BuildResponse start(@PathParam("projectId") Long id,RunRequest input) {
   Project p=visible(id);

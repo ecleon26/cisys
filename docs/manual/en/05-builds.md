@@ -28,7 +28,11 @@ A checkout is limited to `BUILD_MAX_CHECKOUT_MIB` (`cisys.build.max-checkout-mib
 
 If saving a completed result fails, the runner retains it in memory and retries on each dispatcher tick without rerunning the build. Its slot stays reserved until the result is saved.
 
-On restart, interrupted `RUNNING` builds become `FAILED` and retain their partial logs. `QUEUED` builds remain queued and run when a slot is available. Startup also removes leftover `cisys-build-*` containers and images and `cisys-*` checkout directories from an unclean stop; a cleanup failure is logged and does not stop startup. Queued and running builds are protected from retention cleanup and prevent project deletion. This runner supports one backend instance; startup recovery assumes the previous instance has stopped.
+On restart, interrupted `RUNNING` builds become `FAILED`, or `CANCELLED` when a cancellation was requested, and retain their partial logs. `QUEUED` builds remain queued and run when a slot is available. Startup also removes leftover `cisys-build-*` containers and images and `cisys-*` checkout directories from an unclean stop; a cleanup failure is logged and does not stop startup. Queued and running builds are protected from retention cleanup and prevent project deletion. This runner supports one backend instance; startup recovery assumes the previous instance has stopped.
+
+## Cancel a build
+
+Admins, the project's creator and whoever started a build can cancel it while it is `QUEUED` or `RUNNING` with the cancel button on its build page. A queued build becomes `CANCELLED` at once and never runs. For a running build, the runner stops the fetch or the image build within about a second, forcibly after ten more seconds, removes the image and records `CANCELLED` with `Build cancelled` at the end of the log. A cancellation that arrives while the build is finishing still wins. Cancelling a finished build returns HTTP 409.
 
 ## Workflow file
 
@@ -36,7 +40,7 @@ The workflow file format, how the image is built, and its limits are described i
 
 ## What a build records
 
-Each build stores the requested branch, the text of the workflow file it read (shown on the build page), the full name of the base image it found, the credential reference name if one was used (shown to admins only), the base image digest when the container runtime reports one, the commit ID, the exit code of the image build, which is that of the failing step (none when the build timed out or never ran), who started it, and when it started and finished; the duration is derived from these times.
+Each build stores the requested branch, the text of the workflow file it read (shown on the build page), the full name of the base image it found, the credential reference name if one was used (shown to admins only), the base image digest when the container runtime reports one, the commit ID, the exit code of the image build, which is that of the failing step (none when the build timed out, was cancelled or never ran), who started it, and when it started and finished; the duration is derived from these times.
 
 ## Build logs
 
@@ -54,10 +58,10 @@ The project's creator and admins can **Pin** a build on its build page, and **Un
 
 ## Build retention
 
-Every hour, and a minute after startup, cisys deletes old builds of each project together with their logs. A finished, unpinned build is deleted when either
+Every hour, and a minute after startup, cisys deletes old builds of each project together with their logs. A finished or cancelled, unpinned build is deleted when either
 
 * it finished more than the maximum age ago (default 30 days), or
-* the project has more newer finished, unpinned builds than the maximum count (default 50).
+* the project has more newer finished or cancelled, unpinned builds than the maximum count (default 50).
 
 Admins change both limits under **Settings** → **Retention**; `0` turns a limit off. Running and pinned builds are never deleted, and pinned builds do not count towards the limit. Deleted builds cannot be restored, so pin a build to keep it. `BUILD_RETENTION_EVERY` (default `1h`) changes how often the cleanup runs.
 

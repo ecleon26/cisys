@@ -247,4 +247,65 @@ class BuildQueueTest {
   retention.purge(java.time.Instant.now(),1,1);
   assertEquals(Build.Status.QUEUED,read(waiting.id).status);
  }
+ @Test void cancelledQueuedBuildIsNeverClaimed(){
+  Build cancelled=submit(),next=submit();
+  assertTrue(runner.cancel(cancelled.id));
+  Build stored=read(cancelled.id);assertEquals(Build.Status.CANCELLED,stored.status);assertNotNull(stored.finishedAt);
+  assertEquals(next.id,runner.claim().id);
+  assertFalse(runner.cancel(cancelled.id));
+ }
+ @Test void dispatcherKillsRunningBuildOnceItsCancellationIsRequested(){
+  List<BuildRunner.Running> killed=new CopyOnWriteArrayList<>();
+  BuildRunner worker=new BuildRunner(){@Override void kill(Running r){killed.add(r);r.cancelled=true;}};
+  worker.logs=logs;worker.concurrency=1;worker.queueLimit=100;worker.recover(null);
+  try{
+   Build b=submit(),other=submit();runner.concurrency=2;runner.claim();runner.claim();
+   BuildRunner.Running handle=new BuildRunner.Running(),untouched=new BuildRunner.Running();
+   worker.running.put(b.id,handle);worker.running.put(other.id,untouched);
+   worker.dispatch();assertTrue(killed.isEmpty());
+   assertTrue(runner.cancel(b.id));
+   assertEquals(Build.Status.RUNNING,read(b.id).status);assertTrue(read(b.id).cancelRequested);
+   worker.dispatch();assertEquals(List.of(handle),killed);
+   worker.dispatch();assertEquals(1,killed.size(),"a handle is killed once");
+  }finally{worker.stop();}
+ }
+ @Test void cancellationRequestedBeforeCompletionWins(){
+  Build b=submit();runner.claim();
+  assertTrue(runner.cancel(b.id));
+  runner.complete(new BuildRunner.Completion(b.id,Build.Status.PASSED,"revision",0,null,false,java.time.Instant.now()));
+  Build stored=read(b.id);
+  assertEquals(Build.Status.CANCELLED,stored.status);assertNotNull(stored.finishedAt);
+  assertFalse(runner.cancel(b.id));
+ }
+ @Test void completionWithoutCancellationKeepsItsStatus(){
+  Build b=submit();runner.claim();
+  runner.complete(new BuildRunner.Completion(b.id,Build.Status.FAILED,"revision",1,null,false,java.time.Instant.now()));
+  assertEquals(Build.Status.FAILED,read(b.id).status);
+ }
+ @Test void processStartedAfterKillIsStopped()throws Exception{
+  BuildRunner.Running handle=new BuildRunner.Running();
+  runner.kill(handle);
+  long start=System.nanoTime();
+  var r=BuildRunner.stream(List.of("sleep","60"),30,(bytes,off,len)->{},Long.MAX_VALUE,p->runner.started(handle,p));
+  assertFalse(r.timeout());
+  assertTrue(System.nanoTime()-start<TimeUnit.SECONDS.toNanos(15),"the process is stopped as soon as it starts");
+ }
+ @Test void killStopsRunningProcess()throws Exception{
+  BuildRunner.Running handle=new BuildRunner.Running();
+  CountDownLatch published=new CountDownLatch(1);
+  Thread stopper=Thread.ofPlatform().start(()->{try{if(published.await(10,TimeUnit.SECONDS))runner.kill(handle);}catch(InterruptedException e){Thread.currentThread().interrupt();}});
+  long start=System.nanoTime();
+  var r=BuildRunner.stream(List.of("sleep","60"),30,(bytes,off,len)->{},Long.MAX_VALUE,p->{runner.started(handle,p);published.countDown();});
+  stopper.join();
+  assertFalse(r.timeout());
+  assertTrue(System.nanoTime()-start<TimeUnit.SECONDS.toNanos(15));
+ }
+ @Test void retentionPurgesCancelledBuilds(){
+  Build b=submit();assertTrue(runner.cancel(b.id));
+  retention.purge(java.time.Instant.now(),0,1);
+  assertNotNull(read(b.id),"the newest build is kept");
+  submit();Build newer=submit();assertTrue(runner.cancel(newer.id));
+  retention.purge(java.time.Instant.now(),0,1);
+  assertNull(read(b.id));assertNotNull(read(newer.id));
+ }
 }

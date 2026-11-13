@@ -284,4 +284,38 @@ class ProjectPageResourceTest {
     void adminSeesPrivateProject() {
         given().get("/api/project-pages/" + project(true)).then().statusCode(200).body("builds[0].canPin", equalTo(true));
     }
+
+    private void setStatus(long buildId, Build.Status status) {
+        QuarkusTransaction.requiringNew().run(() -> Build.update("status = ?1 where id = ?2", status, buildId));
+    }
+
+    @Test
+    @TestSecurity(user = "lead", roles = "lead")
+    @JwtSecurity(claims = @Claim(key = "sub", value = "owner-id"))
+    void ownerMayCancelOnlyActiveBuilds() {
+        Seeded s = seed(false);
+        String path = "/api/project-pages/" + s.name() + "/builds/" + s.buildId();
+        given().get(path).then().statusCode(200).body("canCancel", equalTo(false));
+        setStatus(s.buildId(), Build.Status.QUEUED);
+        try {
+            given().get(path).then().statusCode(200).body("canCancel", equalTo(true));
+            given().get("/api/project-pages/" + s.name()).then().statusCode(200).body("builds[0].canCancel", equalTo(true));
+        } finally {
+            setStatus(s.buildId(), Build.Status.CANCELLED);
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "lead", roles = "lead")
+    @JwtSecurity(claims = @Claim(key = "sub", value = "other-id"))
+    void otherLeadCannotCancel() {
+        Seeded s = seed(false);
+        setStatus(s.buildId(), Build.Status.RUNNING);
+        try {
+            given().get("/api/project-pages/" + s.name() + "/builds/" + s.buildId()).then().statusCode(200)
+                    .body("canCancel", equalTo(false));
+        } finally {
+            setStatus(s.buildId(), Build.Status.FAILED);
+        }
+    }
 }

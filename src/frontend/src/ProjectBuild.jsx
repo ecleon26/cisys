@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Pin, PinOff } from 'lucide-react';
+import { ArrowLeft, Pin, PinOff, Square } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './components/ui/card';
 import PageHeader from './components/layout/PageHeader';
@@ -22,6 +22,7 @@ export default function ProjectBuild({ name, branch, buildId, load, onBack, onNo
   const [build, setBuild] = useState(undefined);
   const [error, setError] = useState('');
   const [pinning, setPinning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const loadBuild = useCallback(async () => {
     try {
@@ -42,6 +43,15 @@ export default function ProjectBuild({ name, branch, buildId, load, onBack, onNo
     finally { setPinning(false); }
   }
 
+  async function cancel() {
+    setCancelling(true); setError('');
+    try {
+      await load(`/projects/${build.projectId}/builds/${build.id}/cancel`, { method: 'POST' });
+      await loadBuild();
+    } catch (e) { setError(e.message || 'Unable to cancel the build.'); }
+    finally { setCancelling(false); }
+  }
+
   useEffect(() => {
     const initial = setTimeout(loadBuild, 0);
     const timer = setInterval(loadBuild, 5000);
@@ -59,6 +69,8 @@ export default function ProjectBuild({ name, branch, buildId, load, onBack, onNo
   return (
     <main id="project-build" className="page-container">
       <PageHeader title={`Build #${build.id}`} actions={<>
+        {build.canCancel && <Button type="button" variant="outline" size="icon" onClick={cancel} disabled={cancelling}
+          title="Cancel" aria-label="Cancel build"><Square size={16} aria-hidden="true"/></Button>}
         {build.canPin && <Button type="button" variant="outline" size="icon" onClick={togglePin} disabled={pinning}
           title={build.pinned ? 'Unpin' : 'Pin'} aria-label={build.pinned ? 'Unpin build' : 'Pin build'}>
           {build.pinned ? <PinOff size={16} aria-hidden="true"/> : <Pin size={16} aria-hidden="true"/>}

@@ -102,3 +102,6 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxqueuedbuilds integer;
 -- Null uses the configured checkout limits.
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxcheckoutmib integer;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxcheckoutfiles integer;
+
+-- Set on a running build until the runner has stopped it.
+ALTER TABLE build ADD COLUMN IF NOT EXISTS cancelrequested boolean NOT NULL DEFAULT false;

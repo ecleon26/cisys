@@ -13,6 +13,7 @@ import org.eclipse.jgit.dircache.DirCacheCheckout;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.CoreConfig;
+import org.eclipse.jgit.lib.EmptyProgressMonitor;
 import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.Repository;
@@ -33,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.function.BooleanSupplier;
 
 /**
  * Fetches one branch at depth 1 into a new directory, on that branch, with {@code origin} set to the repository. The
@@ -44,9 +46,17 @@ final class Checkout {
 
     private Checkout() {}
 
-    /** Returns the commit ID. {@code dir} must not exist; it is removed again when the checkout fails. */
     static String fetch(Path dir, String url, String branch, CredentialsProvider credentials, int maxMib, int maxFiles)
             throws Exception {
+        return fetch(dir, url, branch, credentials, maxMib, maxFiles, () -> false);
+    }
+
+    /**
+     * Returns the commit ID. {@code dir} must not exist; it is removed again when the checkout fails.
+     * The fetch stops once {@code cancelled} returns true.
+     */
+    static String fetch(Path dir, String url, String branch, CredentialsProvider credentials, int maxMib, int maxFiles,
+                        BooleanSupplier cancelled) throws Exception {
         String ref = Constants.R_REMOTES + "origin/" + branch;
         Files.createDirectory(dir);
         try (LimitedRepository repo = new LimitedRepository(dir.resolve(".git").toFile(), maxMib * MIB); Git git = Git.wrap(repo)) {
@@ -58,7 +68,10 @@ final class Checkout {
             cfg.setString("branch", branch, "remote", "origin");
             cfg.setString("branch", branch, "merge", Constants.R_HEADS + branch);
             cfg.save();
-            var fetch = git.fetch().setRemote(url).setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + ref)).setDepth(1).setTimeout(60);
+            var fetch = git.fetch().setRemote(url).setRefSpecs(new RefSpec("+refs/heads/" + branch + ":" + ref)).setDepth(1).setTimeout(60)
+                    .setProgressMonitor(new EmptyProgressMonitor() {
+                        @Override public boolean isCancelled() { return cancelled.getAsBoolean(); }
+                    });
             if (credentials != null) fetch.setCredentialsProvider(credentials);
             try {
                 fetch.call();

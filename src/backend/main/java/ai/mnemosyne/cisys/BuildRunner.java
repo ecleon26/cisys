@@ -27,6 +27,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -76,10 +77,52 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
    }catch(RuntimeException e){Log.errorf(e,"Could not save result for build %d; will retry",result.id());}
   }
  }
- /** Called inside a fresh transaction, also when retrying a failed commit. */
+ /** Called inside a fresh transaction, also when retrying a failed commit. A cancellation requested meanwhile wins. */
  void persistCompletion(Completion r){
-  Build.update("status = ?1, revision = ?2, exitCode = ?3, imageDigest = ?4, logTruncated = ?5, finishedAt = ?6 where id = ?7 and status = ?8",
-      r.status(),r.revision(),r.exitCode(),r.imageDigest(),r.logTruncated(),r.finishedAt(),r.id(),Build.Status.RUNNING);
+  Build.update("status = case when cancelRequested = true then ?9 else ?1 end, revision = ?2, exitCode = ?3, imageDigest = ?4, logTruncated = ?5, finishedAt = ?6 where id = ?7 and status = ?8",
+      r.status(),r.revision(),r.exitCode(),r.imageDigest(),r.logTruncated(),r.finishedAt(),r.id(),Build.Status.RUNNING,Build.Status.CANCELLED);
+ }
+ /** A build this runner executes, with the container command currently running for it. */
+ static final class Running{
+  volatile boolean cancelled;
+  volatile Process process;
+ }
+ final Map<Long,Running> running=new ConcurrentHashMap<>();
+ /** A queued build is cancelled at once; a running one is stopped by the runner executing it. False when it already finished. */
+ boolean cancel(Long id){
+  return QuarkusTransaction.requiringNew().call(()->{
+   lockQueue();
+   if(Build.update("status = ?1, finishedAt = ?2 where id = ?3 and status = ?4",Build.Status.CANCELLED,Instant.now(),id,Build.Status.QUEUED)==1)return true;
+   return Build.update("cancelRequested = true where id = ?1 and status = ?2",id,Build.Status.RUNNING)==1;
+  });
+ }
+ /** Stops this runner's builds whose cancellation was requested through the API. */
+ void stopCancelled(){
+  if(running.isEmpty())return;
+  List<Long> ids=QuarkusTransaction.requiringNew().call(()->Build.getEntityManager()
+      .createQuery("select b.id from Build b where b.status = ?1 and b.cancelRequested = true and b.id in ?2",Long.class)
+      .setParameter(1,Build.Status.RUNNING).setParameter(2,List.copyOf(running.keySet())).getResultList());
+  for(Long id:ids){Running r=running.get(id);if(r!=null && !r.cancelled)kill(r);}
+ }
+ /** The flag is set before the process is read, and {@link #started} does the reverse, so one of them always stops it. */
+ void kill(Running r){
+  r.cancelled=true;
+  Process p=r.process;
+  if(p!=null)terminate(p);
+ }
+ void started(Running r,Process p){
+  r.process=p;
+  if(r.cancelled)terminate(p);
+ }
+ /** SIGTERM first so the runtime removes its build container, then forcibly. */
+ private void terminate(Process p){
+  p.destroy();
+  Runnable force=()->{
+   try{if(!p.waitFor(10,TimeUnit.SECONDS)){p.descendants().forEach(ProcessHandle::destroyForcibly);p.destroyForcibly();}}
+   catch(InterruptedException e){Thread.currentThread().interrupt();}
+  };
+  try{executor.submit(force);}
+  catch(RejectedExecutionException e){p.descendants().forEach(ProcessHandle::destroyForcibly);p.destroyForcibly();}
  }
  private volatile boolean ready;
  private volatile boolean stopping;
@@ -91,12 +134,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
   if(concurrency<1 || queueLimit<1)throw new IllegalArgumentException("Build concurrency and queue limit must be positive");
   if(maxCheckoutMib<1 || maxCheckoutFiles<1)throw new IllegalArgumentException("Checkout size and file limits must be positive");
   cleanupOrphans();
-  List<Long> running=QuarkusTransaction.requiringNew().call(()->Build.<Build>list("status",Build.Status.RUNNING).stream().map(b->b.id).toList());
-  for(Long id:running){
-   Throwable failure=logs.appendLine(id,"Server restarted during build");
+  List<Build> interrupted=QuarkusTransaction.requiringNew().call(()->Build.<Build>list("status",Build.Status.RUNNING));
+  for(Build build:interrupted){
+   Long id=build.id;boolean cancelled=build.cancelRequested;
+   Throwable failure=logs.appendLine(id,cancelled?"Build cancelled":"Server restarted during build");
    if(failure!=null)Log.errorf(failure,"Could not append to the log of build %d",id);
    QuarkusTransaction.requiringNew().run(()->{
-    Build b=Build.findById(id);b.status=Build.Status.FAILED;b.finishedAt=Instant.now();
+    Build b=Build.findById(id);b.status=cancelled?Build.Status.CANCELLED:Build.Status.FAILED;b.finishedAt=Instant.now();
     if(failure!=null)b.logTruncated=true;
    });
   }
@@ -215,6 +259,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
   if(!ready || stopping)return;
   try{
    retryCompletions();
+   stopCancelled();
    Build b;
    while((b=claim())!=null){
     Build task=b;
@@ -233,6 +278,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  boolean hasPendingBuilds(){return QuarkusTransaction.requiringNew().call(()->Build.count("status in ?1",List.of(Build.Status.QUEUED,Build.Status.RUNNING))>0);}
  private void run(Long id,String url,BuildResource.RunRequest request){
   Path dir=null;String name="cisys-build-"+id,revision=null,status="FAILED",digest=null;Integer exit=null;boolean truncated=false;Throwable captureError=null;BuildLogs.Writer log=null;
+  Running handle=new Running();running.put(id,handle);
   try {
    log=logs.open(id);
    // Checked again here because DNS can change after the project was saved.
@@ -244,9 +290,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
    // The image copies this checkout, so what it gets is what was measured against the limits.
    Path context=Files.createDirectory(dir.resolve("context"));
    Path workspace=context.resolve(Workflow.WORKSPACE);
-   revision=Checkout.fetch(workspace,url,request.branch(),credentials,limits[0],limits[1]);
+   revision=Checkout.fetch(workspace,url,request.branch(),credentials,limits[0],limits[1],()->handle.cancelled);
    // The workflow on the fetched branch describes the image.
    String text=Workflow.read(workspace);
+   if(handle.cancelled)throw new CancellationException();
    if(text==null)throw new IllegalArgumentException("The branch has no "+Workflow.PATH);
    // Stored before parsing, so a build keeps the file that it ran or that failed validation.
    QuarkusTransaction.requiringNew().run(()->Build.update("workflow = ?1 where id = ?2",text,id));
@@ -263,28 +310,37 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
    if(runtime.equals("podman"))build.addAll(List.of("--layers=false","--security-opt=no-new-privileges","--memory=1g","--cpu-period=100000","--cpu-quota=100000"));
    else build.add("--progress=plain");
    build.add(context.toString());
-   Streamed result=stream(build,600,log,logMaxBytes);
+   if(handle.cancelled)throw new CancellationException();
+   Streamed result=stream(build,600,log,logMaxBytes,p->started(handle,p));
    captureError=result.readerError();
    if(result.truncated()){truncated=true;log.line("[output truncated after "+logMaxBytes+" bytes; "+(result.totalBytes()-logMaxBytes)+" further bytes discarded]");}
    digest=digest(from.id());
+   if(handle.cancelled)throw new CancellationException();
    if(result.timeout())log.line("Build timed out");
    else {
     // The image build stops at the first failing RUN and exits with its exit code.
     exit=result.code();
     status=exit==0?"PASSED":"FAILED";
    }
-  } catch(InterruptedException e){
-   if(log!=null)log.line("Build stopped: the server is shutting down");else captureError=e;
-  } catch(IllegalArgumentException e){
-   if(log!=null)log.line("Build failed: "+e.getMessage());else captureError=e;
   } catch(Exception e){
-   if(log!=null)log.line(stopping?"Build stopped: the server is shutting down"
-       :"Build failed during checkout or container execution ("+e.getClass().getSimpleName()+"). Check the runner configuration.");
-   else captureError=e;
+   // A failure caused by the cancellation is not reported as one.
+   if(!handle.cancelled){
+    if(e instanceof InterruptedException){if(log!=null)log.line("Build stopped: the server is shutting down");else captureError=e;}
+    else if(e instanceof IllegalArgumentException){if(log!=null)log.line("Build failed: "+e.getMessage());else captureError=e;}
+    else if(log!=null)log.line(stopping?"Build stopped: the server is shutting down"
+        :"Build failed during checkout or container execution ("+e.getClass().getSimpleName()+"). Check the runner configuration.");
+    else captureError=e;
+   }
   }
   finally {
    // A shutdown interrupts the build; the cleanup and the result must still run, so clear the flag until done.
    boolean interrupted=Thread.interrupted();
+   running.remove(id,handle);
+   // The request can arrive after the last dispatcher poll; persistCompletion also honours one that arrives after this read.
+   boolean cancelled=handle.cancelled;
+   if(!cancelled && running())try{cancelled=QuarkusTransaction.requiringNew().call(()->Build.count("id = ?1 and cancelRequested = true",id)>0);}
+   catch(RuntimeException e){Log.warnf(e,"Could not check whether build %d was cancelled",id);}
+   if(cancelled){status="CANCELLED";exit=null;if(log!=null)log.line("Build cancelled");}
    // The image only exists to run the workflow.
    try{command(List.of(runtime,"rmi","-f",name),60,4096);}catch(Exception ignored){}
    if(dir!=null)try{delete(dir);}catch(Exception ignored){}
@@ -349,10 +405,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  interface LogSink{void append(byte[] bytes,int off,int len);}
  record Streamed(int code,boolean timeout,boolean truncated,long totalBytes,Throwable readerError){}
 
- static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes)throws Exception{return stream(args,timeout,sink,maxBytes,30_000,5_000);}
+ static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes)throws Exception{return stream(args,timeout,sink,maxBytes,p->{});}
+ static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes,Consumer<Process> started)throws Exception{return stream(args,timeout,sink,maxBytes,30_000,5_000,started);}
+ static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes,long drainMillis,long forceMillis)throws Exception{return stream(args,timeout,sink,maxBytes,drainMillis,forceMillis,p->{});}
  /** Output beyond maxBytes, or after the sink fails, is still read and discarded so the process never blocks. */
- static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes,long drainMillis,long forceMillis)throws Exception{
+ static Streamed stream(List<String> args,int timeout,LogSink sink,long maxBytes,long drainMillis,long forceMillis,Consumer<Process> started)throws Exception{
   Process p=new ProcessBuilder(args).redirectErrorStream(true).start();p.getOutputStream().close();
+  started.accept(p);
   InputStream raw=p.getInputStream();
   AtomicLong total=new AtomicLong();
   AtomicReference<Throwable> error=new AtomicReference<>();

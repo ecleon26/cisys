@@ -45,7 +45,7 @@ public class ProjectPageResource {
     /** Leaves out who requested the build and any credential reference, as the page may be anonymous. */
     public record PageBuild(Long id, Long projectId, Build.Status status, String revision, String branch, String image,
                             Instant startedAt, Instant finishedAt, String imageDigest, Integer exitCode,
-                            boolean logTruncated, boolean pinned, boolean canPin,
+                            boolean logTruncated, boolean pinned, boolean canPin, boolean canCancel,
                             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) String workflow) {}
     public record ProjectPage(ProjectInfo project, List<PageBuild> builds) {}
 
@@ -58,7 +58,7 @@ public class ProjectPageResource {
                 : Build.<Build>find("projectId = ?1 and branch = ?2 order by id desc", p.id, branchFilter).page(0, 50).list();
         // Whoever may see a private project may also pin its builds.
         boolean canPin = access.canSeePrivate(p);
-        List<PageBuild> builds = rows.stream().map(b -> pageBuild(b, canPin, false)).toList();
+        List<PageBuild> builds = rows.stream().map(b -> pageBuild(b, canPin, access.canCancel(p, b), false)).toList();
         return new ProjectPage(new ProjectInfo(p.id, p.name, p.repositoryUrl, p.privateRepository), builds);
     }
 
@@ -69,13 +69,13 @@ public class ProjectPageResource {
         Project p = access.visible(name);
         Build b = Build.findById(buildId);
         if (b == null || !p.id.equals(b.projectId)) throw new NotFoundException();
-        return pageBuild(b, access.canSeePrivate(p), true);
+        return pageBuild(b, access.canSeePrivate(p), access.canCancel(p, b), true);
     }
 
     /** The workflow file is sent for a single build only, as it can be up to 64 KiB. */
-    private static PageBuild pageBuild(Build b, boolean canPin, boolean withWorkflow) {
+    private static PageBuild pageBuild(Build b, boolean canPin, boolean canCancel, boolean withWorkflow) {
         return new PageBuild(b.id, b.projectId, b.status, b.revision, b.branch, b.image, b.startedAt,
-                b.finishedAt, b.imageDigest, b.exitCode, b.logTruncated, b.pinned, canPin,
+                b.finishedAt, b.imageDigest, b.exitCode, b.logTruncated, b.pinned, canPin, canCancel,
                 withWorkflow ? b.workflow : null);
     }
 

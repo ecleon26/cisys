@@ -24,11 +24,11 @@ public class BuildRetention {
     static final int BATCH = 500;
 
     private static final String DELETE = """
-            delete from build where status in ('PASSED', 'FAILED') and not pinned and id in (
+            delete from build where status in ('PASSED', 'FAILED', 'CANCELLED') and not pinned and id in (
                 select id from (
                     select id, coalesce(finishedat, startedat) as at, row_number() over (
                         partition by projectid order by coalesce(finishedat, startedat) desc nulls last, id desc) as n
-                    from build where status in ('PASSED', 'FAILED') and not pinned) eligible
+                    from build where status in ('PASSED', 'FAILED', 'CANCELLED') and not pinned) eligible
                 where n > :maxBuilds or at < :cutoff
                 limit :batch)
             """;

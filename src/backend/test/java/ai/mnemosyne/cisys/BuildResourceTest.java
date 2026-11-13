@@ -132,4 +132,24 @@ import java.util.List;
  @Test @TestSecurity(user="member",roles="member") @JwtSecurity(claims=@Claim(key="sub",value="other-id")) void memberDoesNotSeeRequester(){requesterVisible(false);}
  @Test @TestSecurity(user="lead",roles="lead") @JwtSecurity(claims=@Claim(key="sub",value="owner-id")) void leadDoesNotSeeRequester(){requesterVisible(false);}
  @Test @TestSecurity(user="admin",roles="admin") @JwtSecurity(claims=@Claim(key="sub",value="admin-id")) void adminSeesRequester(){requesterVisible(true);}
+ private static Build stored(Long build){return QuarkusTransaction.requiringNew().call(()->Build.findById(build));}
+ private static void requestedBy(Long build,String subject){QuarkusTransaction.requiringNew().run(()->Build.update("requestedBy = ?1 where id = ?2",subject,build));}
+ private static String cancel(Long project,Long build){return "/api/projects/"+project+"/builds/"+build+"/cancel";}
+ @Test @TestSecurity(user="lead",roles="lead") @JwtSecurity(claims=@Claim(key="sub",value="owner-id")) void ownerCancelsQueuedAndRunningBuilds(){
+  Long id=project(false);Long queued=build(id,"QUEUED"),running=build(id,"RUNNING"),done=build(id,"PASSED");
+  given().contentType("application/json").post(cancel(id,queued)).then().statusCode(200).body("status",equalTo("CANCELLED"),"finishedAt",notNullValue());
+  given().contentType("application/json").post(cancel(id,running)).then().statusCode(200).body("status",equalTo("RUNNING"));
+  assertTrue(stored(running).cancelRequested);
+  given().contentType("application/json").post(cancel(id,done)).then().statusCode(409).body("error",equalTo("The build has already finished."));
+  assertEquals(Build.Status.PASSED,stored(done).status);
+ }
+ @Test @TestSecurity(user="admin",roles="admin") @JwtSecurity(claims=@Claim(key="sub",value="admin-id")) void adminCancelsPrivateBuildOfOthers(){Long id=project(true);Long b=build(id,"RUNNING");given().contentType("application/json").post(cancel(id,b)).then().statusCode(200);assertTrue(stored(b).cancelRequested);}
+ @Test @TestSecurity(user="lead",roles="lead") @JwtSecurity(claims=@Claim(key="sub",value="requester-id")) void requesterCancelsOnlyOwnBuild(){
+  Long id=project(false);Long own=build(id,"RUNNING"),others=build(id,"RUNNING");requestedBy(own,"requester-id");
+  given().contentType("application/json").post(cancel(id,own)).then().statusCode(200);assertTrue(stored(own).cancelRequested);
+  given().contentType("application/json").post(cancel(id,others)).then().statusCode(403);assertFalse(stored(others).cancelRequested);
+ }
+ @Test @TestSecurity(user="member",roles="member") @JwtSecurity(claims=@Claim(key="sub",value="other-id")) void memberCannotCancel(){Long id=project(false);Long b=build(id,"RUNNING");given().contentType("application/json").post(cancel(id,b)).then().statusCode(403);assertFalse(stored(b).cancelRequested);}
+ @Test @TestSecurity(user="lead",roles="lead") @JwtSecurity(claims=@Claim(key="sub",value="owner-id")) void cancelOfBuildInOtherProjectIs404(){Long id=project(false),other=project(false);Long b=build(other,"RUNNING");given().contentType("application/json").post(cancel(id,b)).then().statusCode(404);assertFalse(stored(b).cancelRequested);}
+ @Test void recoverCancelsRequestedBuild(){Long id=project(false);Long b=build(id,"RUNNING","partial\n");QuarkusTransaction.requiringNew().run(()->Build.update("cancelRequested = true where id = ?1",b));runner.recover(null);assertEquals(Build.Status.CANCELLED,stored(b).status);assertEquals("partial\nBuild cancelled\n",logs.readAll(b));}
 }

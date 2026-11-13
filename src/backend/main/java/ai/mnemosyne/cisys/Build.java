@@ -14,7 +14,7 @@ import java.time.Instant;
 @Entity public class Build extends PanacheEntity {
  public Long projectId;
  public String requestedBy;
- public enum Status { QUEUED, RUNNING, PASSED, FAILED }
+ public enum Status { QUEUED, RUNNING, PASSED, FAILED, CANCELLED }
  @Enumerated(EnumType.STRING) public Status status;
  public Instant requestedAt;
  @Column(length=2048) public String repositoryUrl;
@@ -30,6 +30,8 @@ import java.time.Instant;
  @Column(nullable=false) public boolean logTruncated;
  /** Pinned builds are kept by retention cleanup. */
  @Column(nullable=false) public boolean pinned;
+ /** Set on a running build; the runner stops it and records it as cancelled. */
+ @Column(nullable=false) public boolean cancelRequested;
  public Instant startedAt;
  public Instant finishedAt;
 }
