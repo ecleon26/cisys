@@ -17,12 +17,14 @@ Members can view build history and logs for the projects they can access. Privat
 
 ## How a build runs
 
-1. The branch is fetched afresh with JGit at depth 1, so a force push is reflected in the next build, and its commit ID is recorded.
+1. The branch is fetched afresh with JGit at depth 1, so a force push is reflected in the next build, and its commit ID is recorded. The checkout must stay within the size and file limits.
 2. The branch's `.cisys/workflows/ci.yml` is read and stored with the build, then validated. A branch without the file, an invalid file, or a `container` image that is not on the build host or that an admin has not allowed on the **Images** page fails the build with a message in the log.
-3. The workflow becomes a Containerfile. Podman builds it with `no-new-privileges`, 1 GiB of memory, one CPU and no layer cache. The image installs `git`, `make`, `podman` and `podman-compose` if they are missing and the workflow's `dependencies`, clones the branch at the recorded commit, and runs the steps as `65534:65534` without network. See **Workflows**.
+3. The workflow becomes a Containerfile. Podman builds it with `no-new-privileges`, 1 GiB of memory, one CPU and no layer cache. The image installs `git`, `make`, `podman` and `podman-compose` if they are missing and the workflow's `dependencies`, copies the checkout from step 1, and runs the steps as `65534:65534` without network. See **Workflows**.
 4. The status is `PASSED` when the image build succeeds, otherwise `FAILED` with the exit code of the failing step. A build that exceeds ten minutes is stopped and reported as timed out. The image is removed afterwards.
 
 Build requests are stored as `QUEUED` and claimed in request order. By default one build runs at a time. Set `BUILD_CONCURRENCY` (`cisys.build.concurrency`) to change the number of concurrent builds and `BUILD_QUEUE_LIMIT` (`cisys.build.queue-limit`, default 100) to limit waiting requests. Both limits must be positive. Admins can change both under **Settings** → **Queue** (1–16 concurrent builds, 1–1000 queued builds); saved values replace the configured ones. A full queue returns HTTP 429 with a clear error. Requests keep their repository URL, branch and credential reference; credentials themselves are read from the environment when execution begins.
+
+A checkout is limited to `BUILD_MAX_CHECKOUT_MIB` (`cisys.build.max-checkout-mib`, default 1024) MiB and `BUILD_MAX_CHECKOUT_FILES` (`cisys.build.max-checkout-files`, default 100000) files. Both limits must be positive. Admins can change both under **Settings** → **Checkout** (1–102400 MiB, 1–1000000 files); saved values replace the configured ones. The fetched data is checked during the fetch, the files are measured as they will be written, after line ending conversion such as `eol=crlf` in `.gitattributes`, before checkout, and the working tree is measured again after checkout. The image copies this checkout and does not fetch the branch again. A repository over a limit fails the build with `Build failed: Repository checkout exceeds the limit of N MiB` (or `N files`) in the log, and the checkout directory is removed.
 
 If saving a completed result fails, the runner retains it in memory and retries on each dispatcher tick without rerunning the build. Its slot stays reserved until the result is saved.
 
@@ -67,7 +69,7 @@ Only `github.com` and `gitlab.com` HTTPS URLs are accepted for builds. Redirects
 
 Set an environment variable whose name starts with `CISYS_GIT_`, for example `CISYS_GIT_PROJECT`, to a read-only provider token in the backend environment before starting it. Then, as an admin, enter that variable name in the build form.
 
-* The value is never stored in the project database. The image build receives it as a build secret for the clone step only; it is not stored in the image and later steps cannot read it.
+* The value is never stored in the project database. Only the backend's fetch uses it; the image build does not receive it, so it is not stored in the image and steps cannot read it.
 * Only admins can use credential references until credentials are scoped to individual projects.
 * Never include secrets in workflow files or build output.
 

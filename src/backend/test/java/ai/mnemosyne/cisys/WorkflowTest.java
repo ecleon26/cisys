@@ -287,17 +287,15 @@ class WorkflowTest {
         // Each quote grows to five characters in the Containerfile ('\'' in JSON), so 13 steps exceed the limit.
         String step = "      - name: s\n        run: x" + "'".repeat(3999) + "\n";
         Workflow w = workflow(step.repeat(13));
-        assertThrows(Workflow.InvalidWorkflowException.class, () -> w.containerfile(ID, URL, "main", REV, false));
+        assertThrows(Workflow.InvalidWorkflowException.class, () -> w.containerfile(ID));
     }
 
-    static final String URL = "https://github.com/example/app";
-    static final String REV = "0123456789abcdef0123456789abcdef01234567";
     static final String ID = "164b5c6a230f645862b6123e07cf0a67f2f03371696aa82a12ccf3589e87c016";
 
     @Test
-    void containerfileClonesTheBranchThenRunsEachStepWithoutNetwork() {
+    void containerfileCopiesTheCheckoutThenRunsEachStepWithoutNetwork() {
         List<String> lines = Workflow.parse(VALID.replace("        wait: 8180\n", "        run: make wait\n"))
-                .containerfile(ID, URL, "feature/x", REV, false).lines().toList();
+                .containerfile(ID).lines().toList();
         assertEquals("FROM " + ID, lines.get(0));
         assertEquals("USER 0", lines.get(1));
         assertTrue(lines.get(2).startsWith("RUN [\"sh\",\"-c\",\". /etc/os-release"), lines.get(2));
@@ -306,10 +304,9 @@ class WorkflowTest {
         assertEquals("RUN --network=none [\"sh\",\"-c\",\"printf '%s' \\\"$1\\\" > /etc/cisys-environment && chown 0:0 /etc/cisys-environment && chmod 444 /etc/cisys-environment\",\"environment\",\"export MODE='test'\\nexport PORT='8180'\\n\"]", lines.get(3));
         assertEquals("USER 65534:65534", lines.get(5));
         assertEquals("WORKDIR /workspace", lines.get(6));
-        String clone = lines.get(8);
-        assertTrue(clone.startsWith("RUN [\"sh\",\"-c\","), clone);
-        assertTrue(clone.endsWith(",\"clone\",\"" + URL + "\",\"feature/x\",\"" + REV + "\"]"), clone);
-        assertFalse(clone.contains("secret"), clone);
+        // The image gets the checkout that was measured against the limits; it does not fetch the branch again.
+        assertEquals("COPY --chown=65534:65534 workspace /workspace", lines.get(8));
+        assertTrue(lines.stream().noneMatch(l -> l.contains("git clone") || l.contains("secret")), String.join("\n", lines));
         List<String> steps = lines.subList(9, lines.size());
         assertEquals(4, steps.size(), String.join("\n", lines));
         assertTrue(steps.stream().allMatch(l -> l.startsWith("RUN --network=none [\"sh\",\"-c\",\". /etc/cisys-environment || exit 1\\n")), String.join("\n", steps));
@@ -344,8 +341,8 @@ class WorkflowTest {
     }
 
     @Test
-    void dependenciesAreInstalledAsRootBeforeTheClone() {
-        List<String> lines = Workflow.parse(DEPENDENCIES).containerfile(ID, URL, "main", REV, false).lines().toList();
+    void dependenciesAreInstalledAsRootBeforeTheCheckout() {
+        List<String> lines = Workflow.parse(DEPENDENCIES).containerfile(ID).lines().toList();
         assertEquals("USER 0", lines.get(1));
         assertTrue(lines.get(3).startsWith("RUN [\"sh\",\"-c\",\". /etc/os-release"), lines.get(3));
         assertEquals("\"JSON processor\",\"jq\",\"Compiler\",\"gcc\"]", installs(lines.get(3)));
@@ -356,7 +353,7 @@ class WorkflowTest {
         }
         assertTrue(lines.get(4).contains("/etc/cisys-environment"), lines.get(4));
         assertEquals("USER 65534:65534", lines.get(6));
-        assertTrue(lines.get(9).contains("\"clone\""), lines.get(9));
+        assertTrue(lines.get(9).startsWith("COPY "), lines.get(9));
         assertEquals(1, lines.stream().filter(l -> l.equals("USER 0")).count(), String.join("\n", lines));
     }
 
@@ -389,16 +386,9 @@ class WorkflowTest {
     }
 
     @Test
-    void credentialIsMountedForTheCloneOnly() {
-        String file = Workflow.parse(VALID).containerfile(ID, URL, "main", REV, true);
-        assertEquals(1, file.split("--mount=type=secret,id=" + Workflow.GIT_SECRET + " ", -1).length - 1, file);
-        assertTrue(file.contains("/run/secrets/" + Workflow.GIT_SECRET), file);
-    }
-
-    @Test
     void argumentsCannotEscapeTheExecForm() {
         String file = workflow("      - name: \"a\\\"]\\nRUN evil\"\n        run: echo \"\\\\\\n\"\n")
-                .containerfile(ID, URL, "main", REV, false);
+                .containerfile(ID);
         assertEquals(10, file.lines().count(), file);
         assertTrue(file.lines().noneMatch(l -> l.startsWith("RUN evil")), file);
     }

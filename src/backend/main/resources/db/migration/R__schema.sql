@@ -98,3 +98,7 @@ ALTER TABLE build ADD COLUMN IF NOT EXISTS workflow character varying(65536);
 -- Null uses the configured queue limits.
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxconcurrentbuilds integer;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxqueuedbuilds integer;
+
+-- Null uses the configured checkout limits.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxcheckoutmib integer;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxcheckoutfiles integer;

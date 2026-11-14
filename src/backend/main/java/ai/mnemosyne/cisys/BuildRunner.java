@@ -17,8 +17,6 @@ import jakarta.annotation.PreDestroy;
 import jakarta.annotation.PostConstruct;
 import io.quarkus.logging.Log;
 import jakarta.ws.rs.WebApplicationException;
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -55,6 +53,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  /** An admin's setting replaces the configured limit. */
  int concurrency(){Integer v=Settings.current().maxConcurrentBuilds;return v!=null?v:concurrency;}
  int queueLimit(){Integer v=Settings.current().maxQueuedBuilds;return v!=null?v:queueLimit;}
+ @ConfigProperty(name="cisys.build.max-checkout-mib",defaultValue="1024") int maxCheckoutMib=1024;
+ @ConfigProperty(name="cisys.build.max-checkout-files",defaultValue="100000") int maxCheckoutFiles=100000;
+ int maxCheckoutMib(){Integer v=Settings.current().maxCheckoutMib;return v!=null?v:maxCheckoutMib;}
+ int maxCheckoutFiles(){Integer v=Settings.current().maxCheckoutFiles;return v!=null?v:maxCheckoutFiles;}
  private final ExecutorService executor=Executors.newCachedThreadPool();
  private final Map<Long,Completion> completions=new ConcurrentHashMap<>();
  record Completion(Long id,Build.Status status,String revision,Integer exitCode,String imageDigest,
@@ -87,6 +89,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  }
  void recover(@Observes StartupEvent event){
   if(concurrency<1 || queueLimit<1)throw new IllegalArgumentException("Build concurrency and queue limit must be positive");
+  if(maxCheckoutMib<1 || maxCheckoutFiles<1)throw new IllegalArgumentException("Checkout size and file limits must be positive");
   cleanupOrphans();
   List<Long> running=QuarkusTransaction.requiringNew().call(()->Build.<Build>list("status",Build.Status.RUNNING).stream().map(b->b.id).toList());
   for(Long id:running){
@@ -234,17 +237,16 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
    log=logs.open(id);
    // Checked again here because DNS can change after the project was saved.
    repositoryUrls.validate(url);
+   UsernamePasswordCredentialsProvider credentials=null;
+   if(request.credentialRef()!=null){String token=System.getenv(request.credentialRef());if(token==null || token.isBlank())throw new IllegalStateException("Missing Git credential");credentials=new UsernamePasswordCredentialsProvider("oauth2",token);}
+   int[] limits=QuarkusTransaction.requiringNew().call(()->new int[]{maxCheckoutMib(),maxCheckoutFiles()});
    dir=Files.createTempDirectory(checkoutRoot(),"cisys-");
-   try(Git git=Git.init().setDirectory(dir.toFile()).call()){
-    var cfg=git.getRepository().getConfig();cfg.setString("http",null,"followRedirects","false");cfg.save();
-    var fetch=git.fetch().setRemote(url).setRefSpecs(new RefSpec("+refs/heads/"+request.branch()+":refs/remotes/origin/build")).setDepth(1).setTimeout(60);
-    if(request.credentialRef()!=null){String token=System.getenv(request.credentialRef());if(token==null || token.isBlank())throw new IllegalStateException("Missing Git credential");fetch.setCredentialsProvider(new UsernamePasswordCredentialsProvider("oauth2",token));}
-    fetch.call();git.checkout().setName("build").setCreateBranch(true).setStartPoint("refs/remotes/origin/build").call();revision=git.getRepository().resolve("HEAD").name();
-   }
-   // The workflow on the fetched branch describes the image. This checkout is only read for the workflow file;
-   // the image clones the branch itself.
-   String text=Workflow.read(dir);
-   delete(dir);dir=null;
+   // The image copies this checkout, so what it gets is what was measured against the limits.
+   Path context=Files.createDirectory(dir.resolve("context"));
+   Path workspace=context.resolve(Workflow.WORKSPACE);
+   revision=Checkout.fetch(workspace,url,request.branch(),credentials,limits[0],limits[1]);
+   // The workflow on the fetched branch describes the image.
+   String text=Workflow.read(workspace);
    if(text==null)throw new IllegalArgumentException("The branch has no "+Workflow.PATH);
    // Stored before parsing, so a build keeps the file that it ran or that failed validation.
    QuarkusTransaction.requiringNew().run(()->Build.update("workflow = ?1 where id = ?2",text,id));
@@ -254,16 +256,12 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
    QuarkusTransaction.requiringNew().run(()->Build.update("image = ?1 where id = ?2",from.name(),id));
    // Allowed when the admin allowed any name of the image, whichever way the workflow names it.
    if(!QuarkusTransaction.requiringNew().call(()->from.names().stream().anyMatch(AllowedImage::isAllowed)))throw new IllegalArgumentException("Image "+base+" is not allowed");
-   String containerfile=workflow.containerfile(from.id(),url,request.branch(),revision,request.credentialRef()!=null);
+   String containerfile=workflow.containerfile(from.id());
    log.line("Workflow "+workflow.name()+" on "+from.name()+" ("+from.id().substring(0,12)+")");
-   dir=Files.createTempDirectory(checkoutRoot(),"cisys-");
-   Path context=Files.createDirectory(dir.resolve("context"));
    Path file=Files.writeString(dir.resolve("Containerfile"),containerfile);
    List<String> build=new ArrayList<>(List.of(runtime,"build","--no-cache","--pull=never","-f",file.toString(),"-t",name));
    if(runtime.equals("podman"))build.addAll(List.of("--layers=false","--security-opt=no-new-privileges","--memory=1g","--cpu-period=100000","--cpu-quota=100000"));
    else build.add("--progress=plain");
-   // The runtime reads the token from its environment, so it never appears in an argument or in the image.
-   if(request.credentialRef()!=null)build.add("--secret=id="+Workflow.GIT_SECRET+",env="+request.credentialRef());
    build.add(context.toString());
    Streamed result=stream(build,600,log,logMaxBytes);
    captureError=result.readerError();

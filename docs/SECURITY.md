@@ -32,6 +32,7 @@ The Keycloak admin console (<http://localhost:8180/admin>) uses `admin` / `admin
 | `PUT /api/branding`                       | no                        | no                   | yes   |
 | `GET`/`PUT /api/settings/retention`       | no                        | no                   | yes   |
 | `GET`/`PUT /api/settings/queue`           | no                        | no                   | yes   |
+| `GET`/`PUT /api/settings/checkout`        | no                        | no                   | yes   |
 | `GET /api/images` (allowed images)        | yes                       | yes                  | yes   |
 | `PUT /api/images`                         | no                        | no                   | yes   |
 | `GET/POST/DELETE /api/images/local`       | no                        | no                   | yes   |
@@ -70,7 +71,8 @@ Controls that are in place
 * Only HTTPS repositories on an allowed host are accepted for builds and branch discovery; redirects, embedded credentials, query strings, fragments and non-default ports are rejected. See [Repository addresses](#repository-addresses).
 * Branch discovery for private projects is not attempted because credentials are not stored on the project; the endpoint returns an empty list with reason `private_repository`.
 * Branch names are validated as Git references. Builds may only use images an admin has allowed; image names are validated against a restrictive pattern.
-* The branch is fetched afresh with JGit at depth 1 to read its workflow file and commit ID. The build then builds an image from the workflow: it installs `git`, `make`, `podman` and `podman-compose` and the workflow's `dependencies` as root, with network access, clones the branch at that commit as `65534:65534`, and runs the steps as `65534:65534` without network. The installs and the clone have network access.
+* The branch is fetched afresh with JGit at depth 1 and its commit ID is recorded. The build then builds an image from the workflow: it installs `git`, `make`, `podman` and `podman-compose` and the workflow's `dependencies` as root, with network access, copies that checkout into the image as `65534:65534`, and runs the steps as `65534:65534` without network. Only the installs have network access; the image build does not fetch the repository again.
+* A checkout is limited to `BUILD_MAX_CHECKOUT_MIB` (default 1024 MiB) and `BUILD_MAX_CHECKOUT_FILES` (default 100000 files); admins can change both under Settings. The received pack is capped while it is fetched, the files are measured as they will be written, after line ending conversion, before checkout, and the written working tree is measured again after checkout. A checkout over a limit fails the build with `Build failed: Repository checkout exceeds the limit of …` and its directory is removed.
 * The image build runs with `no-new-privileges`, 1 GiB of memory and one CPU under Podman; Docker applies neither limit. The image is removed when the build ends.
 * Builds run up to the concurrency limit (default 1, at most 16 when set by an admin); further requests wait in a bounded queue. Each build times out after ten minutes. Output is stored in full, up to the `BUILD_LOG_MAX_BYTES` safety limit (default 1 GiB); output beyond it is discarded and the build is marked truncated.
 * Builds left in the `RUNNING` state by a server restart are marked `FAILED` at startup. Startup also removes leftover `cisys-build-*` containers and images and `cisys-*` checkout directories from an unclean stop; a cleanup failure is logged and does not stop startup.
@@ -84,14 +86,13 @@ Controls that are in place
 
 Known gaps
 
-* Repository checkout size is not bounded.
 * Runner and Podman operation on Windows/WSL has not been verified.
 * Credentials are not scoped to individual projects; only admins may reference one.
 * DNS rebinding between the address check and JGit's own connection is not fully prevented, because JGit resolves the host again when it connects.
 
 ### Git credentials
 
-For private repositories set an environment variable named `CISYS_GIT_<NAME>` to a read-only provider token in the backend environment before starting it, then enter the variable name in the build form as an admin. The value is never stored in the database. The image build receives it as a build secret mounted for the clone step only; it is not stored in the image and later steps cannot read it. Never place secrets in workflow files or build output; each build stores its workflow file.
+For private repositories set an environment variable named `CISYS_GIT_<NAME>` to a read-only provider token in the backend environment before starting it, then enter the variable name in the build form as an admin. The value is never stored in the database. Only the backend's JGit fetch uses it; the image build does not receive it, so it is not in the image and steps cannot read it. Never place secrets in workflow files or build output; each build stores its workflow file.
 
 ## Public access limits
 

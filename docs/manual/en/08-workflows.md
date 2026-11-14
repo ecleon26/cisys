@@ -131,7 +131,7 @@ The build finds out what the container is and installs with its package manager:
 * `value` is one package: letters, digits and `+ . _ : = ~ @ -`, starting with a letter or digit, at most 200 characters. Options such as `-y`, spaces and shell characters are rejected.
 * `name` is required, at most 200 characters, and appears once in the list.
 * Packages are installed as root, with network access. The steps themselves still run as `65534:65534` without network.
-* All dependencies are installed together, in one step, before the branch is cloned, so every job and step can use them. `dependencies` on a job or a step is rejected.
+* All dependencies are installed together, in one step, before the checkout is copied in, so every job and step can use them. `dependencies` on a job or a step is rejected.
 * A package that does not exist, or a container without a supported package manager, fails the build with `==> Could not install …` or `==> Cannot install dependencies …`.
 * Dependencies are always up to date. The package manager reads fresh package metadata on every build, never what the image cached, and installs the newest version. A package the image already has is upgraded. The log shows the version each one ended up at, for example `==> Installed: jq 1.7.1-6+deb13u4`. To stay on one version, give it in `value`.
 * Packages are downloaded on every build. A `container` image that already has them starts faster.
@@ -173,7 +173,7 @@ A build turns the workflow into a Containerfile and builds an image from it with
 1. **Read.** The backend fetches the branch and records its commit ID. It reads `.cisys/workflows/ci.yml` and stores the text with the build, then validates it.
 2. **Base.** `container` is looked up among the local images, and the image starts `FROM` its ID. Nothing is pulled.
 3. **Tools and dependencies.** `git`, `make`, `podman` and `podman-compose` are installed as root if the image lacks them, then the workflow's `dependencies`. This step has network access.
-4. **Checkout.** As the unprivileged user `65534:65534`, the branch is cloned into `/workspace` at depth 1. The build then checks that the clone is at the recorded commit; if the branch moved in the meantime, the build fails. The working tree is **on the branch being tested**, with its `.git` directory, so `git status`, `git log -1` and `git rev-parse HEAD` work. `HOME` is `/tmp`.
+4. **Checkout.** The checkout from step 1 is copied into `/workspace`, owned by the unprivileged user `65534:65534`, so the image builds exactly the recorded commit, within the checkout limits. The working tree is **on the branch being tested**, with its `.git` directory, so `git status`, `git log -1` and `git rev-parse HEAD` work. `HOME` is `/tmp`.
 5. **Steps.** The jobs and steps run in order as `65534:65534`, in `/workspace`, **without network**, with the workflow's, the job's and the step's `environment` variables set. The log marks every job and step with `==> Job:` and `==> Step:` lines.
 6. **Result.** The first failing step stops the build. The log shows `==> Step failed:` with the step name and exit code, and the build records that exit code and the status `FAILED`. When every step succeeds, the build is `PASSED`.
 7. **Cleanup.** The image is removed when the build ends. The log, the workflow text, the commit ID and the base image digest are kept.
@@ -194,7 +194,7 @@ Steps cannot reach the network. A step that downloads dependencies, such as a `m
 
 ## Private repositories
 
-For a private repository, an admin starts the build with a credential reference. The image build reads the token from the backend's environment and hands it to the clone step only, as a build secret. It is not written into a layer, the Containerfile, the build arguments or the log, and later steps cannot read it. See **Private Git repositories** in the **Builds** chapter.
+For a private repository, an admin starts the build with a credential reference. The backend reads the token from its environment for its own fetch only. The image build does not receive it, so it is not written into a layer, the Containerfile, the build arguments or the log, and steps cannot read it. See **Private Git repositories** in the **Builds** chapter.
 
 Never put secrets in a workflow file, because each build stores the file and shows it on the build page.
 

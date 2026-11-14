@@ -46,6 +46,8 @@ erDiagram
         INTEGER retention_max_builds
         INTEGER max_concurrent_builds
         INTEGER max_queued_builds
+        INTEGER max_checkout_mib
+        INTEGER max_checkout_files
     }
 
     PROJECT ||--o{ BUILD : has

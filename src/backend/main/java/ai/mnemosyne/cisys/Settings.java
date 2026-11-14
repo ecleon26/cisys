@@ -25,6 +25,10 @@ public class Settings extends PanacheEntityBase {
     public Integer maxConcurrentBuilds;
     /** Null uses cisys.build.queue-limit. */
     public Integer maxQueuedBuilds;
+    /** Null uses cisys.build.max-checkout-mib. */
+    public Integer maxCheckoutMib;
+    /** Null uses cisys.build.max-checkout-files. */
+    public Integer maxCheckoutFiles;
 
     public static Settings current() {
         Settings s = findById(1L);

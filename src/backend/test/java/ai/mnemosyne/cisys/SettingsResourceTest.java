@@ -84,4 +84,38 @@ class SettingsResourceTest {
             given().contentType("application/json").body(body).put(QUEUE).then().statusCode(400);
         }
     }
+
+    private static final String CHECKOUT = "/api/settings/checkout";
+
+    static void clearCheckout() {
+        QuarkusTransaction.requiringNew().run(() -> Settings.update("maxCheckoutMib = null, maxCheckoutFiles = null where id = 1"));
+    }
+
+    @Test void anonymousCannotReadCheckout() { given().get(CHECKOUT).then().statusCode(401); }
+
+    @Test @TestSecurity(user = "lead", roles = "lead")
+    void leadCannotReadOrUpdateCheckout() {
+        given().get(CHECKOUT).then().statusCode(403);
+        given().contentType("application/json").body("{\"maxSizeMib\":10,\"maxFiles\":10}").put(CHECKOUT).then().statusCode(403);
+    }
+
+    @Test @TestSecurity(user = "admin", roles = "admin")
+    void adminSavesCheckoutOverConfiguredDefaults() {
+        given().get(CHECKOUT).then().statusCode(200).body("maxSizeMib", equalTo(1024), "maxFiles", equalTo(100000));
+        try {
+            given().contentType("application/json").body("{\"maxSizeMib\":64,\"maxFiles\":500}").put(CHECKOUT).then().statusCode(200)
+                    .body("maxSizeMib", equalTo(64), "maxFiles", equalTo(500));
+            given().get(CHECKOUT).then().statusCode(200).body("maxSizeMib", equalTo(64), "maxFiles", equalTo(500));
+        } finally {
+            clearCheckout();
+        }
+    }
+
+    @Test @TestSecurity(user = "admin", roles = "admin")
+    void rejectsInvalidCheckout() {
+        for (String body : new String[] {"{\"maxSizeMib\":0,\"maxFiles\":10}", "{\"maxSizeMib\":102401,\"maxFiles\":10}",
+                "{\"maxSizeMib\":1,\"maxFiles\":0}", "{\"maxSizeMib\":1,\"maxFiles\":1000001}", "{\"maxSizeMib\":1}", "{}"}) {
+            given().contentType("application/json").body(body).put(CHECKOUT).then().statusCode(400);
+        }
+    }
 }
