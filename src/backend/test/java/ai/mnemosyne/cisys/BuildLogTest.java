@@ -129,6 +129,24 @@ class BuildLogTest {
   }
 
   @Test
+  void stagesShareOneLogBudget() throws Exception {
+    Sink sink = new Sink();
+    var first = sh("head -c 600 /dev/zero", sink, 1000);
+    assertEquals(400, BuildRunner.remainingLogBytes(1000, first));
+    var second = sh("head -c 600 /dev/zero", sink, BuildRunner.remainingLogBytes(1000, first));
+    assertTrue(second.truncated());
+    assertEquals(1000, sink.bytes().length);
+
+    Sink full = new Sink();
+    first = sh("head -c 1500 /dev/zero", full, 1000);
+    assertEquals(0, BuildRunner.remainingLogBytes(1000, first));
+    second = sh("head -c 600 /dev/zero", full, BuildRunner.remainingLogBytes(1000, first));
+    assertEquals(0, second.code());
+    assertEquals(600, second.totalBytes());
+    assertEquals(1000, full.bytes().length);
+  }
+
+  @Test
   void streamDrainsPastLimit() throws Exception {
     Sink sink = new Sink();
     long start = System.nanoTime();
