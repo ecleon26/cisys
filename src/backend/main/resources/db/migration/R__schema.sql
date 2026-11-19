@@ -316,3 +316,17 @@ BEGIN
         ALTER TABLE projectmember ADD CONSTRAINT projectmember_role_check CHECK (role IN ('MEMBER', 'LEAD'));
     END IF;
 END $$;
+
+-- Comments on a build, by Keycloak subject. They go with the build, including bulk deletes.
+CREATE TABLE IF NOT EXISTS buildcomment (
+    id bigint NOT NULL,
+    buildid bigint NOT NULL,
+    authorsubject character varying(255) NOT NULL,
+    body character varying(10000) NOT NULL,
+    createdat timestamp(6) with time zone NOT NULL,
+    updatedat timestamp(6) with time zone,
+    CONSTRAINT buildcomment_pkey PRIMARY KEY (id),
+    CONSTRAINT buildcomment_build FOREIGN KEY (buildid) REFERENCES build (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS buildcomment_build ON buildcomment (buildid);
+CREATE SEQUENCE IF NOT EXISTS buildcomment_seq START WITH 1 INCREMENT BY 50;

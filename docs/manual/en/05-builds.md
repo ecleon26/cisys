@@ -97,6 +97,10 @@ The complete output of the build, standard output and standard error together, i
 
 The project's creator and admins can **Pin** a build on its build page, and **Unpin** it again. A pinned build, with its log, is kept permanently; build retention cleanup skips it. Pinned builds are marked with a pin icon in the build history.
 
+## Comments
+
+Members of a project and admins can comment on a build at the bottom of its build page. Only the author can edit a comment; an edited comment is marked **(edited)**. Comments cannot be deleted, and they are deleted together with their build. Anyone who can see the build can read its comments, including visitors of a public project who are not signed in.
+
 ## Build retention
 
 Every hour, and a minute after startup, cisys deletes old builds of each project together with their logs. A finished or cancelled, unpinned build is deleted when either

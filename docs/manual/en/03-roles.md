@@ -36,6 +36,8 @@ The Member, Lead and Admin columns below refer to the caller's global Keycloak r
 | View build history and logs         | yes    | yes  | yes   |
 | Start a build                       | assigned (MEMBER) | assigned | yes   |
 | Pin / unpin a build                 | no     | assigned | yes   |
+| Comment on a build                  | assigned | assigned | yes   |
+| Edit a comment                      | own    | own  | own   |
 | Cancel a build                      | no     | own, or any in their project | yes |
 | Manage project team                | no     | assigned | yes   |
 | Delete a project                    | no     | no   | yes   |

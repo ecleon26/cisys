@@ -38,6 +38,7 @@ public class ProjectPageResource {
   @Inject ProjectAccess access;
   @Inject BuildLogs logs;
   @Inject SecurityIdentity identity;
+  @Inject UserDirectory directory;
 
   /** Anonymous callers may read at most this many bytes of one log in one response. */
   @ConfigProperty(name = "cisys.public.log-max-bytes", defaultValue = "2097152")
@@ -67,6 +68,7 @@ public class ProjectPageResource {
       boolean pinned,
       boolean canPin,
       boolean canCancel,
+      boolean canComment,
       @com.fasterxml.jackson.annotation.JsonInclude(
               com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
           String pullRequestProvider,
@@ -98,7 +100,7 @@ public class ProjectPageResource {
     // Pin/unpin authority: Project LEAD and Global ADMIN, whatever the caller may see.
     boolean canPin = access.canPin(p);
     List<PageBuild> builds =
-        rows.stream().map(b -> pageBuild(b, canPin, access.canCancel(p, b), false)).toList();
+        rows.stream().map(b -> pageBuild(b, canPin, access.canCancel(p, b), false, false)).toList();
     return new ProjectPage(
         new ProjectInfo(p.id, p.name, p.repositoryUrl, p.privateRepository), builds);
   }
@@ -115,7 +117,20 @@ public class ProjectPageResource {
     if (b == null || !p.id.equals(b.projectId)) {
       throw new NotFoundException();
     }
-    return pageBuild(b, access.canPin(p), access.canCancel(p, b), true);
+    return pageBuild(b, access.canPin(p), access.canCancel(p, b), access.canComment(p), true);
+  }
+
+  /** The build's comments, newest first. Visibility matches the build page. */
+  @GET
+  @Path("/builds/{buildId}/comments")
+  public List<BuildCommentResource.View> comments(
+      @PathParam("name") String name, @PathParam("buildId") Long buildId) {
+    Project p = access.visible(name);
+    Build b = Build.findById(buildId);
+    if (b == null || !p.id.equals(b.projectId)) {
+      throw new NotFoundException();
+    }
+    return BuildCommentResource.views(BuildComment.of(buildId), access.subjectOrNull(), directory);
   }
 
   /**
@@ -123,7 +138,7 @@ public class ProjectPageResource {
    * large.
    */
   private static PageBuild pageBuild(
-      Build b, boolean canPin, boolean canCancel, boolean withWorkflow) {
+      Build b, boolean canPin, boolean canCancel, boolean canComment, boolean withWorkflow) {
     return new PageBuild(
         b.id,
         b.number,
@@ -141,6 +156,7 @@ public class ProjectPageResource {
         b.pinned,
         canPin,
         canCancel,
+        canComment,
         b.pullRequestProvider,
         b.pullRequest,
         withWorkflow ? b.workflow : null,

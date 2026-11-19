@@ -25,6 +25,7 @@ import {
 } from "./components/ui/card";
 import PageHeader from "./components/layout/PageHeader";
 import BuildStatus from "./BuildStatus";
+import BuildComments from "./BuildComments";
 import { BuildLogPanel } from "./BuildLogView";
 import {
   duration,
@@ -295,6 +296,13 @@ export default function ProjectBuild({
           />
         </CardContent>
       </Card>
+      <BuildComments
+        name={name}
+        projectId={build.projectId}
+        buildId={build.id}
+        canComment={build.canComment}
+        load={load}
+      />
     </main>
   );
 }

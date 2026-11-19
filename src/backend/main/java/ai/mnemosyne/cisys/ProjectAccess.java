@@ -167,6 +167,11 @@ public class ProjectAccess {
     return isAdmin() || hasRole(p, TeamRole.LEAD);
   }
 
+  /** Commenting on a build follows {@link #buildable}: project members and admins. */
+  public boolean canComment(Project p) {
+    return hasCisysRole() && hasRole(p, TeamRole.MEMBER);
+  }
+
   /** Whether the build is queued or running and {@link #mayCancel} allows it. */
   boolean canCancel(Project p, Build b) {
     return (b.status == Build.Status.QUEUED || b.status == Build.Status.RUNNING) && mayCancel(p, b);
@@ -204,7 +209,7 @@ public class ProjectAccess {
         && (identity.hasRole("member") || identity.hasRole("lead") || identity.hasRole("admin"));
   }
 
-  private String subjectOrNull() {
+  String subjectOrNull() {
     if (identity.isAnonymous() || !(identity.getPrincipal() instanceof JsonWebToken jwt)) {
       return null;
     }

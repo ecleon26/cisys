@@ -8,8 +8,8 @@
 
 The sources are in `src/backend/main/java/ai/mnemosyne/cisys`.
 
-* The data model uses JPA entities backed by [Hibernate ORM Panache](https://quarkus.io/guides/hibernate-orm-panache): `Project`, `Build`, `Branding` and `Settings`.
-* HTTP endpoints use JAX-RS via [Quarkus REST](https://quarkus.io/guides/rest): `ProjectResource` (`/api/session`, `/api/projects`), `BuildResource` (`/api/projects/{projectId}/builds`), `BrandingResource` (`/api/branding`) and `SettingsResource` (`/api/settings`, including the global automatic-build settings under `/api/settings/polling`). A `@Scheduled` `CommitPoller` discovers new commits on a timer and queues them; there is no inbound push endpoint.
+* The data model uses JPA entities backed by [Hibernate ORM Panache](https://quarkus.io/guides/hibernate-orm-panache): `Project`, `Build`, `BuildComment`, `Branding` and `Settings`.
+* HTTP endpoints use JAX-RS via [Quarkus REST](https://quarkus.io/guides/rest): `ProjectResource` (`/api/session`, `/api/projects`), `BuildResource` (`/api/projects/{projectId}/builds`), `BuildCommentResource` (`/api/projects/{projectId}/builds/{buildId}/comments`), `BrandingResource` (`/api/branding`) and `SettingsResource` (`/api/settings`, including the global automatic-build settings under `/api/settings/polling`). A `@Scheduled` `CommitPoller` discovers new commits on a timer and queues them; there is no inbound push endpoint.
 * `BuildLogs` stores each build log as one PostgreSQL large object, using JDBC and the pgjdbc `LargeObjectManager` directly rather than Hibernate. Output is appended while the build runs and streamed back from `/api/projects/{projectId}/builds/{buildId}/log`, about 1 MB per short transaction, so a log is never held in memory whole. cisys supports PostgreSQL only.
 * `BuildRunner` fetches repositories with [JGit](https://www.eclipse.org/jgit/) and runs builds through the Docker or Podman command line. It claims `QUEUED` builds in request order, up to the concurrency limit set under Settings or in configuration. Each dispatcher tick also stops the running builds whose cancellation was requested.
 * `EgressProxy` is a per-build HTTPS `CONNECT` proxy on a Unix socket. Podman mounts the socket directory into each step, which still runs with `--network=none`; `socat` in the step forwards `127.0.0.1:3128` to it. The proxy allows only the hosts set under Settings → Network (`NetworkHost` rows, checked as a `NetworkAllowlist`; `*` means every public host) on the configured ports, and never protected addresses. `NetworkTemplate` lists the hosts of well-known registries.
@@ -83,7 +83,17 @@ erDiagram
         INTEGER max_build_pids
     }
 
+    BUILD_COMMENT {
+        BIGINT id PK
+        BIGINT build_id FK
+        STRING author_subject
+        STRING body
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
     PROJECT ||--o{ BUILD : has
+    BUILD ||--o{ BUILD_COMMENT : has
 ```
 
 Users and roles are stored in Keycloak and managed from the Users page through the Keycloak Admin REST API; `owner_subject`, `requested_by` and `projectmember.subject` hold the Keycloak subject. `projectmember.role` decides what a member can do in the project.
