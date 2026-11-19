@@ -10,7 +10,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource/red-hat-text";
-@import "highlight.js/styles/github.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -167,56 +166,6 @@
   }
 }
 
-@layer utilities {
-  .editor-shell button,
-  .editor-shell [data-slot="button"],
-  .editor-shell [data-slot="select-trigger"] {
-    background: #fff !important;
-    background-color: #fff !important;
-    color: #1a1a1a !important;
-    border-color: var(--color-border) !important;
-    background-image: none !important;
-  }
-
-  .editor-shell button:hover,
-  .editor-shell [data-slot="button"]:hover,
-  .editor-shell [data-slot="button"][aria-expanded="true"],
-  .editor-shell [data-slot="select-trigger"]:hover,
-  .editor-shell [data-slot="select-trigger"][aria-expanded="true"] {
-    background: #f5f6f8 !important;
-    background-color: #f5f6f8 !important;
-    color: #1a1a1a !important;
-  }
-
-  .editor-shell button *,
-  .editor-shell [data-slot="button"] a,
-  .editor-shell [data-slot="button"] svg,
-  .editor-shell [data-slot="select-trigger"] * {
-    color: inherit !important;
-  }
-
-  .dark .editor-shell button,
-  .dark .editor-shell [data-slot="button"],
-  .dark .editor-shell [data-slot="select-trigger"] {
-    background: #111827 !important;
-    background-color: #111827 !important;
-    color: #f9fafb !important;
-    border-color: #374151 !important;
-    background-image: none !important;
-  }
-
-  .dark .editor-shell button:hover,
-  .dark .editor-shell [data-slot="button"]:hover,
-  .dark .editor-shell [data-slot="button"][aria-expanded="true"],
-  .dark .editor-shell [data-slot="button"][data-state="on"],
-  .dark .editor-shell [data-slot="select-trigger"]:hover,
-  .dark .editor-shell [data-slot="select-trigger"][aria-expanded="true"] {
-    background: #1f2937 !important;
-    background-color: #1f2937 !important;
-    color: #f9fafb !important;
-  }
-}
-
 @keyframes ticket-alarm-blink {
   50% {
     opacity: 0.2;
@@ -227,92 +176,4 @@
   to {
     transform: rotate(360deg);
   }
-}
-
-/* Dark theme overrides for highlight.js */
-.dark .hljs {
-  color: #c9d1d9;
-  background: transparent;
-}
-.dark .hljs-doctag,
-.dark .hljs-keyword,
-.dark .hljs-meta .hljs-keyword,
-.dark .hljs-template-tag,
-.dark .hljs-template-variable,
-.dark .hljs-type,
-.dark .hljs-variable.language_ {
-  color: #ff7b72;
-}
-.dark .hljs-title,
-.dark .hljs-title.class_,
-.dark .hljs-title.class_.inherited__,
-.dark .hljs-title.function_ {
-  color: #d2a8ff;
-}
-.dark .hljs-attr,
-.dark .hljs-attribute,
-.dark .hljs-literal,
-.dark .hljs-meta,
-.dark .hljs-number,
-.dark .hljs-operator,
-.dark .hljs-variable,
-.dark .hljs-selector-attr,
-.dark .hljs-selector-class,
-.dark .hljs-selector-id {
-  color: #79c0ff;
-}
-.dark .hljs-regexp,
-.dark .hljs-string,
-.dark .hljs-meta .hljs-string {
-  color: #a5d6ff;
-}
-.dark .hljs-built_in,
-.dark .hljs-symbol {
-  color: #ffa657;
-}
-.dark .hljs-comment,
-.dark .hljs-code,
-.dark .hljs-formula {
-  color: #8b949e;
-}
-.dark .hljs-name,
-.dark .hljs-quote,
-.dark .hljs-selector-tag,
-.dark .hljs-selector-pseudo {
-  color: #7ee787;
-}
-.dark .hljs-subst {
-  color: #c9d1d9;
-}
-.dark .hljs-section {
-  color: #1f6feb;
-  font-weight: bold;
-}
-.dark .hljs-bullet {
-  color: #f2cc60;
-}
-.dark .hljs-emphasis {
-  color: #c9d1d9;
-  font-style: italic;
-}
-.dark .hljs-strong {
-  color: #c9d1d9;
-  font-weight: bold;
-}
-.dark .hljs-addition {
-  color: #aff5b4;
-  background-color: #033a16;
-}
-.dark .hljs-deletion {
-  color: #ffdcd7;
-  background-color: #67060c;
-}
-
-/* Remove default padding/bg from both themes because we handle it in our own components */
-pre code.hljs {
-  padding: 0;
-  background: transparent;
-}
-code.hljs {
-  background: transparent;
 }
