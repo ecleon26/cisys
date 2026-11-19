@@ -26,6 +26,7 @@ The Keycloak admin console (<http://localhost:8180/admin>) uses `admin` / `admin
 | `GET /api/projects/{id}/builds[/{id}]`    | visible projects          | visible projects     | all   |
 | `GET /api/projects/{id}/branches`         | visible projects          | visible projects     | all   |
 | `POST /api/projects/{id}/builds`          | no                        | yes                  | yes   |
+| `POST .../builds/{id}/rerun`              | assigned projects         | assigned projects    | yes   |
 | `POST` build with a `credentialRef`       | no                        | no                   | yes   |
 | `PUT`/`DELETE .../builds/{id}/pin`        | no                        | own projects         | yes   |
 | `POST .../builds/{id}/comments`           | assigned projects         | assigned projects    | yes   |

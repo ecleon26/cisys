@@ -172,6 +172,13 @@ public class ProjectAccess {
     return hasCisysRole() && hasRole(p, TeamRole.MEMBER);
   }
 
+  /** Re-running follows {@link #buildable}: project members and admins. */
+  boolean canRerun(Project p, Build b) {
+    return hasCisysRole()
+        && hasRole(p, TeamRole.MEMBER)
+        && BuildResource.notRerunnable(p, b) == null;
+  }
+
   /** Whether the build is queued or running and {@link #mayCancel} allows it. */
   boolean canCancel(Project p, Build b) {
     return (b.status == Build.Status.QUEUED || b.status == Build.Status.RUNNING) && mayCancel(p, b);

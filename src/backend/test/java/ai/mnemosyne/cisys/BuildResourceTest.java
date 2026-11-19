@@ -19,6 +19,7 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -824,5 +825,172 @@ class BuildResourceTest {
     runner.recover(null);
     assertEquals(Build.Status.CANCELLED, stored(b).status);
     assertEquals("partial\nBuild cancelled\n", logs.readAll(b));
+  }
+
+  private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
+
+  /** A finished build of the project's current repository at {@link #COMMIT}. */
+  private Long finished(Long project, String status) {
+    Long b = build(project, status);
+    QuarkusTransaction.requiringNew()
+        .run(() -> {
+          Build row = Build.findById(b);
+          row.revision = COMMIT;
+          row.repositoryUrl = Project.<Project>findById(project).repositoryUrl;
+          row.finishedAt = java.time.Instant.now();
+        });
+    return b;
+  }
+
+  private static String rerun(Long project, Long build) {
+    return "/api/projects/" + project + "/builds/" + build + "/rerun";
+  }
+
+  private static io.restassured.response.ValidatableResponse postRerun(Long project, Long build) {
+    return given().contentType("application/json").post(rerun(project, build)).then();
+  }
+
+  private static void deleteQueued(Long project) {
+    QuarkusTransaction.requiringNew()
+        .run(() -> Build.delete("projectId = ?1 and status = ?2", project, Build.Status.QUEUED));
+  }
+
+  @Test
+  @TestSecurity(user = "member", roles = "member")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "other-id"))
+  void memberRerunsFinishedBuildAtSameCommitWithCurrentCredential() {
+    Long id = project(true);
+    membership(id, "other-id", ProjectMember.TeamRole.MEMBER);
+    Long b = finished(id, "FAILED");
+    QuarkusTransaction.requiringNew()
+        .run(() -> {
+          Build.update("credentialRef = 'CISYS_GIT_OLD' where id = ?1", b);
+          Project.<Project>findById(id).credentialRef = "CISYS_GIT_CURRENT";
+        });
+    try {
+      int queued =
+          given()
+              .contentType("application/json")
+              .post(rerun(id, b))
+              .then()
+              .statusCode(200)
+              .body(
+                  "status", equalTo("QUEUED"),
+                  "branch", equalTo("main"),
+                  "revision", equalTo(COMMIT),
+                  "trigger", equalTo("MANUAL"),
+                  "$", not(hasKey("credentialRef")))
+              .extract()
+              .path("id");
+      Build row = stored((long) queued);
+      assertEquals("CISYS_GIT_CURRENT", row.credentialRef);
+      assertEquals("other-id", row.requestedBy);
+      assertTrue(row.number > stored(b).number);
+    } finally {
+      deleteQueued(id);
+    }
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "owner-id"))
+  void rerunOfPublicProjectSendsNoCredential() {
+    Long id = project(false);
+    Long b = finished(id, "PASSED");
+    QuarkusTransaction.requiringNew()
+        .run(() -> Build.update("credentialRef = 'CISYS_GIT_OLD' where id = ?1", b));
+    try {
+      int queued =
+          given()
+              .contentType("application/json")
+              .post(rerun(id, b))
+              .then()
+              .statusCode(200)
+              .extract()
+              .path("id");
+      assertNull(stored((long) queued).credentialRef);
+    } finally {
+      deleteQueued(id);
+    }
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "owner-id"))
+  void rerunRejectsBuildsThatCannotBeRepeated() {
+    Long id = project(false);
+    Long running = finished(id, "RUNNING");
+    Long pullRequest = finished(id, "PASSED");
+    Long noCommit = build(id, "FAILED");
+    Long moved = finished(id, "FAILED");
+    QuarkusTransaction.requiringNew()
+        .run(() -> {
+          Build pr = Build.findById(pullRequest);
+          pr.trigger = Build.Trigger.PULL_REQUEST;
+          pr.pullRequest = 7;
+          pr.pullRequestProvider = "GITHUB";
+          Build.update("repositoryUrl = 'https://github.com/old/repository' where id = ?1", moved);
+        });
+    try {
+      postRerun(id, running).statusCode(409).body(containsString("not finished"));
+      postRerun(id, pullRequest).statusCode(409).body(containsString("Pull request"));
+      postRerun(id, noCommit).statusCode(409).body(containsString("no commit"));
+      postRerun(id, moved).statusCode(409).body(containsString("repository has changed"));
+      assertEquals(
+          0L,
+          QuarkusTransaction.requiringNew()
+              .call(() -> Build.count("projectId = ?1 and status = ?2", id, Build.Status.QUEUED)));
+    } finally {
+      QuarkusTransaction.requiringNew()
+          .run(() -> Build.update("status = ?1 where id = ?2", Build.Status.FAILED, running));
+    }
+  }
+
+  @Test
+  @TestSecurity(user = "member", roles = "member")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "other-id"))
+  void rerunNeedsProjectMembership() {
+    Long id = project(false);
+    Long b = finished(id, "FAILED");
+    postRerun(id, b).statusCode(403);
+    Long hidden = project(true);
+    postRerun(hidden, finished(hidden, "FAILED")).statusCode(404);
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "owner-id"))
+  void rerunOfBuildInOtherProjectIs404() {
+    Long id = project(false), other = project(false);
+    postRerun(id, finished(other, "FAILED")).statusCode(404);
+  }
+
+  @Test
+  @TestSecurity(user = "member", roles = "member")
+  @JwtSecurity(claims = @Claim(key = "sub", value = "other-id"))
+  void buildPageOffersRerunToMembersOnly() {
+    Long id = project(false);
+    Long b = finished(id, "FAILED");
+    String page =
+        "/api/project-pages/"
+            + QuarkusTransaction.requiringNew().call(() -> Project.<Project>findById(id).name)
+            + "/builds/"
+            + b;
+    given().get(page).then().statusCode(200).body("canRerun", equalTo(false));
+    membership(id, "other-id", ProjectMember.TeamRole.MEMBER);
+    given().get(page).then().statusCode(200).body("canRerun", equalTo(true));
+  }
+
+  @Test
+  void anonymousVisitorsAreNotOfferedRerun() {
+    Long id = project(false);
+    Long b = finished(id, "FAILED");
+    String name = QuarkusTransaction.requiringNew().call(() -> Project.<Project>findById(id).name);
+    given()
+        .get("/api/project-pages/" + name + "/builds/" + b)
+        .then()
+        .statusCode(200)
+        .body("canRerun", equalTo(false));
+    postRerun(id, b).statusCode(401);
   }
 }

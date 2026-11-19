@@ -68,6 +68,7 @@ public class ProjectPageResource {
       boolean pinned,
       boolean canPin,
       boolean canCancel,
+      boolean canRerun,
       boolean canComment,
       @com.fasterxml.jackson.annotation.JsonInclude(
               com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
@@ -100,7 +101,9 @@ public class ProjectPageResource {
     // Pin/unpin authority: Project LEAD and Global ADMIN, whatever the caller may see.
     boolean canPin = access.canPin(p);
     List<PageBuild> builds =
-        rows.stream().map(b -> pageBuild(b, canPin, access.canCancel(p, b), false, false)).toList();
+        rows.stream()
+            .map(b -> pageBuild(b, canPin, access.canCancel(p, b), false, false, false))
+            .toList();
     return new ProjectPage(
         new ProjectInfo(p.id, p.name, p.repositoryUrl, p.privateRepository), builds);
   }
@@ -117,7 +120,13 @@ public class ProjectPageResource {
     if (b == null || !p.id.equals(b.projectId)) {
       throw new NotFoundException();
     }
-    return pageBuild(b, access.canPin(p), access.canCancel(p, b), access.canComment(p), true);
+    return pageBuild(
+        b,
+        access.canPin(p),
+        access.canCancel(p, b),
+        access.canRerun(p, b),
+        access.canComment(p),
+        true);
   }
 
   /** The build's comments, newest first. Visibility matches the build page. */
@@ -138,7 +147,12 @@ public class ProjectPageResource {
    * large.
    */
   private static PageBuild pageBuild(
-      Build b, boolean canPin, boolean canCancel, boolean canComment, boolean withWorkflow) {
+      Build b,
+      boolean canPin,
+      boolean canCancel,
+      boolean canRerun,
+      boolean canComment,
+      boolean withWorkflow) {
     return new PageBuild(
         b.id,
         b.number,
@@ -156,6 +170,7 @@ public class ProjectPageResource {
         b.pinned,
         canPin,
         canCancel,
+        canRerun,
         canComment,
         b.pullRequestProvider,
         b.pullRequest,

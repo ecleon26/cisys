@@ -477,6 +477,7 @@ function App() {
               buildId={buildId}
               load={publicJson}
               onBack={() => openProject(projectName, projectBranch)}
+              onOpenBuild={openBuild}
               onNotFound={showFrontPage}
             />
           ) : (
@@ -666,6 +667,7 @@ function App() {
             buildId={buildId}
             load={api}
             onBack={() => openProject(projectName, projectBranch)}
+            onOpenBuild={openBuild}
             onNotFound={showFrontPage}
           />
         ) : (

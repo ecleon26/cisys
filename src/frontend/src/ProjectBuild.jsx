@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Pin,
   PinOff,
+  RotateCcw,
   Square,
 } from "lucide-react";
 import { Button } from "./components/ui/button";
@@ -78,6 +79,7 @@ export default function ProjectBuild({
   buildId,
   load,
   onBack,
+  onOpenBuild,
   onNotFound,
 }) {
   // undefined while loading.
@@ -85,6 +87,7 @@ export default function ProjectBuild({
   const [error, setError] = useState("");
   const [pinning, setPinning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   const loadBuild = useCallback(async () => {
     try {
@@ -127,6 +130,23 @@ export default function ProjectBuild({
       setError(e.message || "Unable to cancel the build.");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function rerun() {
+    setRerunning(true);
+    setError("");
+    try {
+      const queued = await load(
+        `/projects/${build.projectId}/builds/${build.id}/rerun`,
+        { method: "POST" },
+      );
+      if (onOpenBuild) onOpenBuild(name, queued.branch, queued.id);
+      else await loadBuild();
+    } catch (e) {
+      setError(e.message || "Unable to run the build again.");
+    } finally {
+      setRerunning(false);
     }
   }
 
@@ -176,6 +196,19 @@ export default function ProjectBuild({
                 aria-label="Cancel build"
               >
                 <Square size={16} aria-hidden="true" />
+              </Button>
+            )}
+            {build.canRerun && (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={rerun}
+                disabled={rerunning}
+                title="Re-run"
+                aria-label="Re-run build"
+              >
+                <RotateCcw size={16} aria-hidden="true" />
               </Button>
             )}
             {build.canPin && (

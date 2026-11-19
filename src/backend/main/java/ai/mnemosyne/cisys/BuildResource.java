@@ -224,4 +224,63 @@ public class BuildResource {
     RunRequest request = new RunRequest(input.branch(), credentialRef);
     return response(runner.submit(id, access.subject(), p.repositoryUrl, request));
   }
+
+  /**
+   * Queues a new manual build of a finished build's branch and commit. Project members (any role)
+   * and global admins. The project's current credential is used, not the one the build had.
+   */
+  @POST
+  @Path("/{buildId}/rerun")
+  public BuildResponse rerun(@PathParam("projectId") Long id, @PathParam("buildId") Long buildId) {
+    Project p = access.buildable(id);
+    Build b = Build.findById(buildId);
+    if (b == null || !id.equals(b.projectId)) {
+      throw new NotFoundException();
+    }
+    String reason = notRerunnable(p, b);
+    if (reason != null) {
+      throw new WebApplicationException(
+          Response.status(409)
+              .type(MediaType.APPLICATION_JSON)
+              .entity(java.util.Map.of("error", reason))
+              .build());
+    }
+    try {
+      repositoryUrls.validate(RepositoryUrls.cloneUrl(p.repositoryUrl));
+    } catch (IllegalArgumentException e) {
+      throw new BadRequestException(e.getMessage());
+    }
+    return response(
+        runner.submit(
+            id,
+            access.subject(),
+            p.repositoryUrl,
+            b.branch,
+            p.privateRepository ? p.credentialRef : null,
+            b.revision,
+            Build.Trigger.MANUAL,
+            null,
+            null,
+            null));
+  }
+
+  /** Why the build cannot be run again, or null when it can. */
+  static String notRerunnable(Project p, Build b) {
+    if (b.status == Build.Status.QUEUED || b.status == Build.Status.RUNNING) {
+      return "The build has not finished yet.";
+    }
+    // Pull request builds run without a credential from the trusted mirror only.
+    if (b.trigger == Build.Trigger.PULL_REQUEST) {
+      return "Pull request builds cannot be run again.";
+    }
+    if (b.revision == null || b.branch == null) {
+      return "The build has no commit to run again.";
+    }
+    if (b.repositoryUrl == null
+        || !java.util.Objects.equals(
+            RepositoryUrls.normalize(b.repositoryUrl), RepositoryUrls.normalize(p.repositoryUrl))) {
+      return "The project's repository has changed since this build.";
+    }
+    return null;
+  }
 }

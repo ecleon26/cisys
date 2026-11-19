@@ -36,6 +36,10 @@ On restart, interrupted `RUNNING` builds become `FAILED`, or `CANCELLED` when a 
 
 Admins, the project's creator and whoever started a build can cancel it while it is `QUEUED` or `RUNNING` with the cancel button on its build page. A queued build becomes `CANCELLED` at once and never runs. For a running build, the runner stops the fetch or the image build within about a second, forcibly after ten more seconds, removes the image and records `CANCELLED` with `Build cancelled` at the end of the log. A cancellation that arrives while the build is finishing still wins. Cancelling a finished build returns HTTP 409.
 
+## Re-run a build
+
+Project members and admins can run a finished build again with the re-run button on its build page. The new build is a manual build of the same branch and commit, with the project's current credential reference, and the page opens it. The branch's newer commits are not built. Re-running returns HTTP 409 for a build that is still queued or running, a pull request build, a build that never recorded a commit, and a build of a repository URL the project no longer uses. When the commit is no longer reachable on the branch, the new build fails at checkout.
+
 ## Automatic builds
 
 **Automatic builds** are one global setting for the whole instance, not a per-project option; only an admin can change them. They are on by default. cisys then polls each project's repository on a timer with plain Git and queues a build for a new commit. It needs no push hook and no provider API, so GitHub, GitLab, self-hosted and private repositories all work the same way, and no provider needs to reach cisys.
