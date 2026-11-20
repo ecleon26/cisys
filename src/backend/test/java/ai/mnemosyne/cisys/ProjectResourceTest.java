@@ -298,6 +298,57 @@ class ProjectResourceTest {
   @Test
   @TestSecurity(user = "lead", roles = "lead")
   @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
+  void rejectsTheManualName() {
+    for (String name : new String[] {"manual", "Manual", "MANUAL"}) {
+      given()
+          .contentType("application/json")
+          .body(
+              "{\"name\":\"" + name + "\",\"repositoryUrl\":\"https://github.com/org/manual.git\"}")
+          .when()
+          .post("/api/projects")
+          .then()
+          .statusCode(400)
+          .body("error", equalTo(ProjectResource.RESERVED_RULE));
+    }
+    Long id = project("lead-id", false);
+    given()
+        .contentType("application/json")
+        .body("{\"name\":\"manual\",\"repositoryUrl\":\"https://github.com/org/manual.git\"}")
+        .when()
+        .put("/api/projects/" + id)
+        .then()
+        .statusCode(400)
+        .body("error", equalTo(ProjectResource.RESERVED_RULE));
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
+  void projectNamedManualBeforeTheReservationCanStillBeEdited() {
+    Long id = project("lead-id", false);
+    String url = "https://github.com/org/legacy-manual-" + java.util.UUID.randomUUID() + ".git";
+    QuarkusTransaction.requiringNew()
+        .run(() -> {
+          Project p = Project.findById(id);
+          p.name = "Manual";
+          p.repositoryUrl = url;
+        });
+    try {
+      given()
+          .contentType("application/json")
+          .body("{\"name\":\"manual\",\"repositoryUrl\":\"" + url + "\"}")
+          .when()
+          .put("/api/projects/" + id)
+          .then()
+          .statusCode(200);
+    } finally {
+      QuarkusTransaction.requiringNew().run(() -> Project.findById(id).delete());
+    }
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
   void acceptsSlugNames() {
     for (String name : new String[] {"slug", "My.Project_2-x", "9lives", "a".repeat(100)}) {
       given()

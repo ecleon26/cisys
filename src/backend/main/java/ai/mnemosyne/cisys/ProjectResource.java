@@ -76,6 +76,11 @@ public class ProjectResource {
   static final String NAME_RULE =
       "Project names use letters, digits, '.', '_' and '-', and start with a letter or digit";
 
+  /** The UI serves the manual at /manual, so no project may take that path. */
+  static final String RESERVED_NAME = "manual";
+
+  static final String RESERVED_RULE = "The project name 'manual' is reserved";
+
   /** A project to create. */
   public record CreateProject(
       String name, String repositoryUrl, boolean privateRepository, String credentialRef) {}
@@ -154,6 +159,9 @@ public class ProjectResource {
     // The name is the project's URL path, for example /cisys/ in the UI.
     if (!NAME.matcher(name).matches()) {
       throw badRequest(NAME_RULE);
+    }
+    if (name.equalsIgnoreCase(RESERVED_NAME)) {
+      throw badRequest(RESERVED_RULE);
     }
     String url;
     try {
@@ -305,6 +313,10 @@ public class ProjectResource {
     String name = input.name().trim();
     if (!NAME.matcher(name).matches()) {
       throw badRequest(NAME_RULE);
+    }
+    // A project created before the name was reserved keeps it.
+    if (name.equalsIgnoreCase(RESERVED_NAME) && !name.equalsIgnoreCase(p.name)) {
+      throw badRequest(RESERVED_RULE);
     }
     String url;
     try {

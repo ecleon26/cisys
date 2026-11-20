@@ -29,7 +29,7 @@ Private projects use the same page once you sign in as a member of the project o
 
 Leads and admins can create projects. Enter
 
-* **Name**: up to 100 letters, digits, `.`, `_` and `-`, starting with a letter or digit, for example `my-project`. The name is the project's URL, `/<name>/`
+* **Name**: up to 100 letters, digits, `.`, `_` and `-`, starting with a letter or digit, for example `my-project`. The name is the project's URL, `/<name>/`. `manual` is reserved for the manual at `/manual`
 * **Repository URL**: an HTTPS URL without embedded credentials, up to 2048 characters
 * **Private**: whether the project is private
 * **Credential reference**: admins only, and only for private projects. The name of an environment variable that holds a read-only token for the repository, for example `CISYS_GIT_PROJECT`. The token itself is never entered here or stored in the database.

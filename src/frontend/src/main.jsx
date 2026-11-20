@@ -50,7 +50,12 @@ import PublicStats from "./PublicStats";
 import ProjectBuilds from "./ProjectBuilds";
 import ProjectBuild from "./ProjectBuild";
 import ProjectSettings from "./ProjectSettings";
+import ManualPage from "./ManualPage";
+import ManualButton from "./ManualButton";
+import { chapterBySlug, chapters } from "./manual";
 import {
+  manualFromPath,
+  manualPath,
   projectBuildFromPath,
   projectNameFromPath,
   projectPath,
@@ -204,6 +209,10 @@ function App() {
   const [projectSettings, setProjectSettings] = useState(
     () => projectSettingsFromPath(window.location.pathname) !== null,
   );
+  // Set to { slug } when the URL is the manual, /manual or /manual/builds.
+  const [manual, setManual] = useState(() =>
+    manualFromPath(window.location.pathname),
+  );
   const [dark, setDark] = useState(
     () => localStorage.getItem("cisys-theme") === "dark",
   );
@@ -292,6 +301,7 @@ function App() {
       setBuildId(build ? build.buildId : null);
       setProjectBranch(build ? build.branch : "");
       setProjectSettings(settings !== null);
+      setManual(manualFromPath(window.location.pathname));
       setProjectName(
         settings
           ? settings.name
@@ -313,6 +323,7 @@ function App() {
     setProjectBranch("");
     setBuildId(null);
     setProjectSettings(false);
+    setManual(null);
     setSettingsDirty(false);
     setPage(target);
   }
@@ -329,14 +340,35 @@ function App() {
       path !== "/" &&
       projectName === null &&
       buildId === null &&
-      !projectSettings
+      !projectSettings &&
+      manual === null
     )
       showFrontPage();
-  }, [projectName, buildId, projectSettings, showFrontPage]);
+  }, [projectName, buildId, projectSettings, manual, showFrontPage]);
+
+  // /manual and unknown chapters show the first chapter.
+  useEffect(() => {
+    if (manual && !chapterBySlug(manual.slug) && chapters.length > 0) {
+      window.history.replaceState(null, "", manualPath(chapters[0].slug));
+      setManual({ slug: chapters[0].slug });
+    }
+  }, [manual]);
+
+  function openManual(slug) {
+    if (submitting || !confirmLeave()) return;
+    window.history.pushState(null, "", manualPath(slug));
+    setSettingsDirty(false);
+    setProjectName(null);
+    setProjectBranch("");
+    setBuildId(null);
+    setProjectSettings(false);
+    setManual({ slug });
+  }
 
   function openProject(name, branch = "") {
     if (submitting || !confirmLeave()) return;
     window.history.pushState(null, "", projectPath(name));
+    setManual(null);
     setSettingsDirty(false);
     setProjectName(name);
     setProjectBranch(branch);
@@ -347,6 +379,7 @@ function App() {
   function openBuild(name, branch, id) {
     if (!confirmLeave()) return;
     window.history.pushState(null, "", buildPath(name, branch, id));
+    setManual(null);
     setSettingsDirty(false);
     setProjectName(name);
     setProjectBranch(branch);
@@ -357,6 +390,7 @@ function App() {
   function openProjectSettings(name) {
     if (submitting || !confirmLeave()) return;
     window.history.pushState(null, "", projectSettingsPath(name));
+    setManual(null);
     setSettingsDirty(false);
     setProjectName(name);
     setProjectBranch("");
@@ -466,8 +500,13 @@ function App() {
         onSignIn={() => keycloak.login()}
         dark={dark}
         setDark={setDark}
+        onOpenManual={() => openManual(manual?.slug ?? chapters[0]?.slug)}
+        manualActive={manual !== null}
       >
-        {projectName !== null &&
+        {manual !== null ? (
+          <ManualPage slug={manual.slug} onOpen={openManual} />
+        ) : (
+          projectName !== null &&
           !projectSettings &&
           (buildId !== null ? (
             <ProjectBuild
@@ -489,7 +528,8 @@ function App() {
               onOpenBuild={openBuild}
               onNotFound={showFrontPage}
             />
-          ))}
+          ))
+        )}
       </PublicHome>
     );
   if (!ready)
@@ -512,6 +552,8 @@ function App() {
     viewedProject != null && (isAdmin || team.get(viewedProject.id) != null);
   // Only admins can set a project credential, and only a private project can have one.
   const showCredential = user.roles.includes("admin") && priv;
+  const onPage = (target) =>
+    projectName === null && manual === null && page === target;
   const role = user.roles.includes("admin")
     ? "Admin"
     : user.roles.includes("lead")
@@ -556,9 +598,7 @@ function App() {
             <button
               type="button"
               className="nav-link"
-              aria-current={
-                projectName === null && page === "projects" ? "page" : undefined
-              }
+              aria-current={onPage("projects") ? "page" : undefined}
               onClick={() => go("projects")}
             >
               Projects
@@ -567,9 +607,7 @@ function App() {
               <button
                 type="button"
                 className="nav-link"
-                aria-current={
-                  projectName === null && page === "images" ? "page" : undefined
-                }
+                aria-current={onPage("images") ? "page" : undefined}
                 onClick={() => go("images")}
               >
                 Images
@@ -579,9 +617,7 @@ function App() {
               <button
                 type="button"
                 className="nav-link"
-                aria-current={
-                  projectName === null && page === "users" ? "page" : undefined
-                }
+                aria-current={onPage("users") ? "page" : undefined}
                 onClick={() => go("users")}
               >
                 Users
@@ -591,11 +627,7 @@ function App() {
               <button
                 type="button"
                 className="nav-link"
-                aria-current={
-                  projectName === null && page === "settings"
-                    ? "page"
-                    : undefined
-                }
+                aria-current={onPage("settings") ? "page" : undefined}
                 onClick={() => go("settings")}
               >
                 Settings
@@ -604,6 +636,10 @@ function App() {
           </nav>
         </div>
         <div className="header-actions">
+          <ManualButton
+            active={manual !== null}
+            onOpen={() => openManual(chapters[0]?.slug)}
+          />
           <button
             type="button"
             className="theme-toggle"
@@ -643,7 +679,9 @@ function App() {
           </DropdownMenu>
         </div>
       </header>
-      {projectName !== null ? (
+      {manual !== null ? (
+        <ManualPage slug={manual.slug} onOpen={openManual} />
+      ) : projectName !== null ? (
         projectSettings ? (
           canEditSettings ? (
             <ProjectSettings

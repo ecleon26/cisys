@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
 } from "./components/ui/dropdown-menu";
 import AppFooter from "./components/layout/AppFooter";
+import ManualButton from "./ManualButton";
 import PublicStats from "./PublicStats";
 import headerLogo from "./assets/logo-header.svg";
 
@@ -27,6 +28,8 @@ export default function PublicHome({
   onSignIn,
   dark,
   setDark,
+  onOpenManual,
+  manualActive,
   children,
 }) {
   // One-way flag: once the logo request fails (404 when none is set) we use the bundled logo and never retry.
@@ -49,6 +52,7 @@ export default function PublicHome({
           </a>
         </div>
         <div className="header-actions">
+          <ManualButton active={manualActive} onOpen={onOpenManual} />
           <button
             type="button"
             className="theme-toggle"

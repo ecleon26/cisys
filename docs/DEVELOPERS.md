@@ -20,6 +20,8 @@ The default password is `cisys`. Enable access in `pg_hba.conf` and reload.
 
 ### Generate the manual
 
+The application shows the manual at `/manual`, bundled from `docs/manual/en` by the frontend build. The steps below generate the HTML and PDF versions.
+
 1. Download dependencies
 
 ``` sh

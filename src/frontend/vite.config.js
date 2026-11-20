@@ -13,4 +13,6 @@ import { fileURLToPath, URL } from "node:url";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // The manual is bundled from docs/manual/en at the repository root.
+  server: { fs: { allow: [fileURLToPath(new URL("../..", import.meta.url))] } },
 });
