@@ -127,6 +127,27 @@ class WorkflowTest {
   }
 
   @Test
+  void rejectsSymbolicLinkDirectory() throws Exception {
+    Path outside = temp.resolve("outside/workflows");
+    Files.createDirectories(outside);
+    Files.writeString(outside.resolve("ci.yml"), "secret");
+    Path checkout = Files.createDirectories(temp.resolve("checkout/.cisys"));
+    Files.createSymbolicLink(checkout.resolve("workflows"), outside);
+    assertThrows(
+        Workflow.InvalidWorkflowException.class, () -> Workflow.read(checkout.getParent()));
+  }
+
+  @Test
+  void rejectsSymbolicLinkTopDirectory() throws Exception {
+    Path outside = temp.resolve("outside/workflows");
+    Files.createDirectories(outside);
+    Files.writeString(outside.resolve("ci.yml"), "secret");
+    Path checkout = Files.createDirectories(temp.resolve("checkout"));
+    Files.createSymbolicLink(checkout.resolve(".cisys"), outside.getParent());
+    assertThrows(Workflow.InvalidWorkflowException.class, () -> Workflow.read(checkout));
+  }
+
+  @Test
   void rejectsLargeFile() throws Exception {
     Path file = temp.resolve(Workflow.PATH);
     Files.createDirectories(file.getParent());

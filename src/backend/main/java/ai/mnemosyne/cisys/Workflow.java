@@ -127,9 +127,16 @@ public record Workflow(
    * they read it.
    */
   public static String read(Path checkout) throws IOException {
-    Path file = checkout.resolve(PATH);
-    if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-      return null;
+    // NOFOLLOW_LINKS covers only the last name, so each directory on the way is checked too.
+    Path file = checkout;
+    for (Path part : Path.of(PATH)) {
+      file = file.resolve(part.toString());
+      if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+        return null;
+      }
+      if (Files.isSymbolicLink(file)) {
+        throw new InvalidWorkflowException(PATH + " must not be a symbolic link");
+      }
     }
     if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
       throw new InvalidWorkflowException(PATH + " must be a regular file");
