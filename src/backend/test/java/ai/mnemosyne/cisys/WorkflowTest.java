@@ -691,4 +691,161 @@ class WorkflowTest {
             () -> Workflow.parse(VALID.replace("    steps:", "    stepz:")));
     assertTrue(e.getMessage().contains("stepz"), e.getMessage());
   }
+
+  static final String ARTIFACTS =
+      """
+      artifacts:
+        - name: Test results
+          path: target/surefire-reports
+        - name: Jars
+          path: target/*.jar
+      """;
+
+  @Test
+  void parsesArtifacts() {
+    Workflow w = Workflow.parse(VALID + ARTIFACTS);
+    assertEquals(
+        List.of(
+            new Workflow.Artifact("Test results", "target/surefire-reports"),
+            new Workflow.Artifact("Jars", "target/*.jar")),
+        w.artifacts());
+    assertTrue(w.hasArtifacts());
+    assertFalse(Workflow.parse(VALID).hasArtifacts());
+  }
+
+  @Test
+  void rejectsInvalidArtifacts() {
+    for (String path :
+        List.of(
+            "/etc/passwd",
+            "../outside",
+            "a/../b",
+            "./a",
+            "a//b",
+            "a/",
+            "-rf",
+            "*/x",
+            "a b",
+            "a;b",
+            "$(id)",
+            "a`b",
+            "~/x",
+            "x".repeat(1001))) {
+      String yaml = VALID + "artifacts:\n  - name: A\n    path: \"" + path + "\"\n";
+      assertThrows(Workflow.InvalidWorkflowException.class, () -> Workflow.parse(yaml), path);
+    }
+    for (String artifacts :
+        List.of(
+            "artifacts: []\n",
+            "artifacts:\n  - path: a\n",
+            "artifacts:\n  - name: A\n",
+            "artifacts:\n  - name: A\n    path: a\n  - name: A\n    path: b\n",
+            "artifacts:\n  - name: A\n    path: a\n    when: always\n",
+            "artifacts:\n"
+                + java.util.stream.IntStream.range(0, Workflow.MAX_ARTIFACTS + 1)
+                    .mapToObj(i -> "  - name: N" + i + "\n    path: p" + i + "\n")
+                    .collect(java.util.stream.Collectors.joining()))) {
+      assertThrows(
+          Workflow.InvalidWorkflowException.class,
+          () -> Workflow.parse(VALID + artifacts),
+          artifacts);
+    }
+    assertThrows(
+        Workflow.InvalidWorkflowException.class,
+        () ->
+            Workflow.parse(
+                VALID.replace(
+                    "    steps:", "    artifacts:\n      - name: A\n        path: a\n    steps:")));
+  }
+
+  @Test
+  void containerfileCollectsArtifactsWhenAStepFailsAndAfterTheLastStep() {
+    String file =
+        Workflow.parse(
+                VALID.replace("        wait: 8180\n", "        run: make wait\n") + ARTIFACTS)
+            .containerfile(ID);
+    List<Instruction> in = instructions(file);
+    // tar joins the tools.
+    assertTrue(
+        in.get(2).body().contains("for tool in git make podman podman-compose tar; do"),
+        in.get(2).body());
+    // Root writes the collect script read-only, before switching to the build user.
+    Instruction collect = in.get(4);
+    assertTrue(collect.body().startsWith("cat > /etc/cisys-collect <<'COLLECT'\n"), collect.body());
+    assertTrue(
+        collect.body().contains("for p in ./target/surefire-reports ./target/*.jar; do"),
+        collect.body());
+    assertTrue(
+        collect.body().endsWith("chown 0:0 /etc/cisys-collect && chmod 555 /etc/cisys-collect\n"),
+        collect.body());
+    assertEquals("USER 65534:65534", in.get(6).line());
+    List<Instruction> steps = in.subList(10, in.size());
+    assertEquals(4, steps.size(), file);
+    for (Instruction step : steps) {
+      // A failing step collects, then exits with its own code.
+      assertTrue(
+          step.body().contains("exit code' \"$rc\"; sh /etc/cisys-collect; exit \"$rc\"; }"),
+          step.body());
+    }
+    String last = steps.get(3).body();
+    assertTrue(last.endsWith("sh /etc/cisys-collect\n" + Workflow.CLEAN_UP), last);
+    for (Instruction step : steps.subList(0, 3)) {
+      assertFalse(step.body().contains("sh /etc/cisys-collect\n"), step.body());
+    }
+  }
+
+  @Test
+  void waitStepTimeoutCollectsArtifacts() {
+    String file = Workflow.parse(VALID + ARTIFACTS).containerfile(ID);
+    assertTrue(file.contains("seconds'; sh /etc/cisys-collect; exit 1; fi"), file);
+  }
+
+  @Test
+  void withoutArtifactsTheContainerfileIsUnchanged() {
+    String file = Workflow.parse(VALID).containerfile(ID);
+    assertFalse(file.contains("cisys-collect"), file);
+    assertFalse(file.contains(" tar;"), file);
+  }
+
+  @Test
+  void collectScriptArchivesTheListedPathsWithoutFollowingLinks() throws Exception {
+    Path workspace = Files.createDirectories(temp.resolve("workspace"));
+    Path out = Files.createDirectories(temp.resolve("out"));
+    Files.createDirectories(workspace.resolve("target/surefire-reports"));
+    Files.writeString(workspace.resolve("target/surefire-reports/TEST-a.xml"), "<a/>");
+    Files.writeString(workspace.resolve("target/app.jar"), "jar");
+    Files.writeString(workspace.resolve("target/my lib.jar"), "lib");
+    Path secret = Files.writeString(temp.resolve("secret"), "secret");
+    Files.createSymbolicLink(workspace.resolve("target/link.jar"), secret);
+    String script =
+        Workflow.parse(VALID + ARTIFACTS + "  - name: Missing\n    path: nothing/here\n")
+            .collectScript()
+            .replace("/workspace", workspace.toString())
+            .replace(Workflow.ARTIFACT_DIR, out.toString());
+
+    var r = runScript(script);
+
+    assertEquals(0, r.code(), r.output());
+    assertTrue(r.output().contains("==> Artifact not found: nothing/here"), r.output());
+    java.util.Map<String, String> files = new java.util.TreeMap<>();
+    List<String> log = new java.util.ArrayList<>();
+    try (var in = Files.newInputStream(out.resolve(Workflow.ARTIFACT_ARCHIVE))) {
+      ArtifactArchive.read(
+          in,
+          1 << 20,
+          100,
+          path -> true,
+          (path, size, data) ->
+              files.put(
+                  path, new String(data.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)),
+          log::add);
+    }
+    assertEquals(
+        java.util.Map.of(
+            "target/surefire-reports/TEST-a.xml", "<a/>",
+            "target/app.jar", "jar",
+            "target/my lib.jar", "lib"),
+        files);
+    assertEquals(List.of("==> Artifact skipped: target/link.jar (symbolic link)"), log);
+  }
 }

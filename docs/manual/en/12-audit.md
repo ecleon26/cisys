@@ -36,6 +36,7 @@ Every event stores a snapshot of the actor, the project and the target, so the e
 | `settings.retention.update` | Build retention limits change. |
 | `settings.builds.update` | Concurrency, queue and timeout settings change. |
 | `settings.checkout.update` | Checkout size and file limits change. |
+| `settings.artifacts.update` | Artifact size and file limits change. |
 | `settings.performance.update` | Build memory, CPU and process limits change. |
 | `settings.polling.update` | Automatic-build settings change. |
 | `settings.pullrequests.update` | Pull request builds are enabled or disabled. |

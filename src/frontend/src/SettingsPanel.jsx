@@ -87,6 +87,25 @@ const SECTIONS = {
       },
     ],
   },
+  artifacts: {
+    title: "Artifacts",
+    fields: [
+      {
+        key: "maxSizeMib",
+        id: "artifacts-size",
+        label: "Max size (MiB)",
+        min: 1,
+        max: 10240,
+      },
+      {
+        key: "maxFiles",
+        id: "artifacts-files",
+        label: "Max files",
+        min: 1,
+        max: 100000,
+      },
+    ],
+  },
   performance: {
     title: "Performance",
     fields: [

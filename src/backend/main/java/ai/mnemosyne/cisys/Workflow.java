@@ -62,7 +62,8 @@ public record Workflow(
     List<Variable> environment,
     List<Dependency> dependencies,
     List<Job> jobs,
-    Map<String, List<Map<String, String>>> reports) {
+    Map<String, List<Map<String, String>>> reports,
+    List<Artifact> artifacts) {
   /**
    * Where the steps read {@link #environment()} from. Root writes it before the checkout and makes
    * it read-only, so a step cannot add variables for the steps after it.
@@ -83,6 +84,39 @@ public record Workflow(
 
   /** A report type key under {@code reports}, such as {@code list}. */
   static final String REPORT_TYPE = "[a-z][a-z0-9-]{0,49}";
+
+  /** The most entries under {@code artifacts}. */
+  static final int MAX_ARTIFACTS = 20;
+
+  /** The longest artifact path, in the workflow and in the archive. */
+  static final int MAX_ARTIFACT_PATH = 1000;
+
+  /**
+   * Relative, without shell characters, {@code ..} or empty segments, and {@code *} only in the
+   * last segment, so the collect script can expand it unquoted.
+   */
+  static final String ARTIFACT_PATH =
+      "(?!-)(?!.*(^|/)\\.\\.?(/|$))(?!.*//)([A-Za-z0-9._+@-]+/)*[A-Za-z0-9._+@*-]+";
+
+  /** Where the build mounts the directory the collect script writes the archive to. */
+  static final String ARTIFACT_DIR = "/run/cisys-artifacts";
+
+  /** The archive the collect script writes in {@link #ARTIFACT_DIR}. */
+  static final String ARTIFACT_ARCHIVE = "artifacts.tar";
+
+  /** The collect script, written by root so the steps cannot change it. */
+  static final String COLLECT = "/etc/cisys-collect";
+
+  /**
+   * One entry of the workflow's {@code artifacts}: a file or directory under {@code /workspace},
+   * with {@code *} allowed in the last segment.
+   */
+  public record Artifact(String name, String path) {}
+
+  /** Whether the workflow lists artifacts. */
+  public boolean hasArtifacts() {
+    return artifacts != null && !artifacts.isEmpty();
+  }
 
   /** One entry of an {@code environment} list. */
   public record Variable(String name, String value) {}
@@ -192,6 +226,7 @@ public record Workflow(
       throw new InvalidWorkflowException("container is not a valid image reference");
     }
     validateReports(reports);
+    validateArtifacts(artifacts);
     if (jobs == null || jobs.isEmpty()) {
       throw new InvalidWorkflowException("At least one job is required");
     }
@@ -273,6 +308,41 @@ public record Workflow(
         if (names.size() > MAX_REPORTS) {
           throw new InvalidWorkflowException("At most " + MAX_REPORTS + " reports are allowed");
         }
+      }
+    }
+  }
+
+  private static void validateArtifacts(List<Artifact> artifacts) {
+    if (artifacts == null) {
+      return;
+    }
+    if (artifacts.isEmpty()) {
+      throw new InvalidWorkflowException("artifacts needs at least one entry");
+    }
+    if (artifacts.size() > MAX_ARTIFACTS) {
+      throw new InvalidWorkflowException("At most " + MAX_ARTIFACTS + " artifacts are allowed");
+    }
+    Set<String> names = new HashSet<>();
+    for (int i = 0; i < artifacts.size(); i++) {
+      Artifact a = artifacts.get(i);
+      String at = "artifacts[" + i + "]";
+      if (a == null) {
+        throw new InvalidWorkflowException(at + " is empty");
+      }
+      requireName(a.name(), at + ".name");
+      if (!names.add(a.name())) {
+        throw new InvalidWorkflowException(at + ".name " + a.name() + " appears more than once");
+      }
+      if (a.path() == null) {
+        throw new InvalidWorkflowException(at + ".path is required");
+      }
+      if (a.path().length() > MAX_ARTIFACT_PATH || !a.path().matches(ARTIFACT_PATH)) {
+        throw new InvalidWorkflowException(
+            at
+                + ".path '"
+                + a.path()
+                + "' must be a relative path of letters, digits and . _ + @ -, with * in the"
+                + " last part only");
       }
     }
   }
@@ -479,7 +549,7 @@ public record Workflow(
     StringBuilder f = new StringBuilder();
     f.append("FROM ").append(baseId).append('\n');
     f.append("USER 0\n");
-    run(f, false, "", network ? INSTALL_NETWORK_TOOLS : INSTALL_TOOLS, "tools");
+    run(f, false, "", installTools(network), "tools");
     install(f, false, dependencies);
     checkSize(f);
     return f.toString();
@@ -523,7 +593,7 @@ public record Workflow(
     // its files keep the exec form.
     boolean readable = perRunNetworkFlags;
     if (installToolsAndDependencies) {
-      run(f, readable, "", network ? INSTALL_NETWORK_TOOLS : INSTALL_TOOLS, "tools");
+      run(f, readable, "", installTools(network), "tools");
       install(f, readable, dependencies);
     }
     String flags = perRunNetworkFlags ? "--network=none " : "";
@@ -557,6 +627,21 @@ public record Workflow(
           "printf '%s' \"$1\" > " + ENVIRONMENT_FILE + protect,
           "environment",
           exports());
+    }
+    if (hasArtifacts()) {
+      String collect = collectScript();
+      String lock = " && chown 0:0 " + COLLECT + " && chmod 555 " + COLLECT;
+      if (readable) {
+        String end = delimiter("COLLECT", collect);
+        run(
+            f,
+            true,
+            flags,
+            "cat > " + COLLECT + " <<'" + end + "'\n" + collect + end + "\n" + lock.substring(4),
+            "artifacts");
+      } else {
+        run(f, false, flags, "printf '%s' \"$1\" > " + COLLECT + lock, "artifacts", collect);
+      }
     }
     run(
         f,
@@ -596,7 +681,7 @@ public record Workflow(
           .append(cache)
           .append('\n');
     }
-    List<String> runs = runs(waitSeconds);
+    List<String> runs = runs(waitSeconds, hasArtifacts());
     for (int i = 0; i < runs.size(); i++) {
       run(
           f,
@@ -607,7 +692,9 @@ public record Workflow(
               + " || exit 1\n"
               + (network ? PROXY : "")
               + runs.get(i)
-              + (i == runs.size() - 1 ? saveCache(cache) + CLEAN_UP : ""),
+              + (i == runs.size() - 1
+                  ? (hasArtifacts() ? COLLECT_CALL + "\n" : "") + saveCache(cache) + CLEAN_UP
+                  : ""),
           "step");
     }
     checkSize(f);
@@ -701,6 +788,16 @@ public record Workflow(
 
   private static final String INSTALL_TOOLS = installTools(TOOLS);
   private static final String INSTALL_NETWORK_TOOLS = installTools(NETWORK_TOOLS);
+
+  /** The tools this workflow needs: with network {@code socat}, with artifacts {@code tar}. */
+  private String installTools(boolean network) {
+    if (!hasArtifacts()) {
+      return network ? INSTALL_NETWORK_TOOLS : INSTALL_TOOLS;
+    }
+    List<String> tools = new java.util.ArrayList<>(network ? NETWORK_TOOLS : TOOLS);
+    tools.add("tar");
+    return installTools(tools);
+  }
 
   private static String installTools(List<String> tools) {
     return PACKAGE_MANAGER
@@ -808,14 +905,52 @@ public record Workflow(
   String script(int waitSeconds) {
     // Each RUN is a new shell, so each runs in a subshell here.
     StringBuilder s = new StringBuilder(exports());
-    for (String run : runs(waitSeconds)) {
+    for (String run : runs(waitSeconds, false)) {
       s.append("(\n").append(run).append(") || exit $?\n");
     }
     return s.toString();
   }
 
+  /** Runs the collect script; it always exits 0, so the caller's exit code is kept. */
+  static final String COLLECT_CALL = "sh " + COLLECT;
+
+  /**
+   * The collect script: writes the listed paths that exist to {@link #ARTIFACT_ARCHIVE} with {@code
+   * tar}, which stores symbolic links as links instead of following them. Paths get a {@code ./}
+   * prefix so an expansion cannot start with {@code -}.
+   */
+  String collectScript() {
+    StringBuilder s = new StringBuilder();
+    s.append("cd /workspace || exit 0\n");
+    s.append("echo '==> Collecting artifacts'\n");
+    s.append("set --\n");
+    s.append("for p in");
+    for (Artifact a : artifacts) {
+      s.append(" ./").append(a.path());
+    }
+    s.append("; do\n");
+    s.append("  if [ -e \"$p\" ] || [ -L \"$p\" ]; then set -- \"$@\" \"$p\";");
+    s.append(" else echo \"==> Artifact not found: ${p#./}\"; fi\n");
+    s.append("done\n");
+    s.append("[ \"$#\" -gt 0 ] || exit 0\n");
+    s.append("rm -f ").append(ARTIFACT_DIR).append('/').append(ARTIFACT_ARCHIVE).append('\n');
+    s.append("tar -cf ")
+        .append(ARTIFACT_DIR)
+        .append('/')
+        .append(ARTIFACT_ARCHIVE)
+        .append(" \"$@\" 2>/dev/null || echo '==> Could not collect every artifact'\n");
+    s.append("exit 0\n");
+    return s.toString();
+  }
+
   /** The scripts of the Containerfile's step {@code RUN}s. */
   List<String> runs(int waitSeconds) {
+    return runs(waitSeconds, false);
+  }
+
+  /** As above; with {@code collect}, a failing step runs the collect script before it exits. */
+  List<String> runs(int waitSeconds, boolean collect) {
+    String onFailure = collect ? COLLECT_CALL + "; " : "";
     List<String> runs = new java.util.ArrayList<>();
     for (Job job : jobs) {
       String header = "echo " + quote("==> Job: " + job.job()) + "\n";
@@ -824,13 +959,13 @@ public record Workflow(
       if (job.steps().stream().anyMatch(step -> !step.isRun())) {
         StringBuilder s = new StringBuilder(jobEnvironment + header);
         for (Step step : job.steps()) {
-          s.append(step(step, waitSeconds));
+          s.append(step(step, waitSeconds, onFailure));
         }
         runs.add(s.toString());
       } else {
         for (int i = 0; i < job.steps().size(); i++) {
           Step step = job.steps().get(i);
-          runs.add(jobEnvironment + (i == 0 ? header : "") + step(step, waitSeconds));
+          runs.add(jobEnvironment + (i == 0 ? header : "") + step(step, waitSeconds, onFailure));
         }
       }
     }
@@ -842,7 +977,7 @@ public record Workflow(
    * kernel's TCP tables for a listening socket on the port, so the image needs only {@code sh} and
    * {@code grep}.
    */
-  private static String step(Step step, int waitSeconds) {
+  private static String step(Step step, int waitSeconds, String onFailure) {
     StringBuilder s = new StringBuilder();
     s.append("echo ").append(quote("==> Step: " + step.name())).append('\n');
     if (step.isRun()) {
@@ -854,7 +989,9 @@ public record Workflow(
           .append(own.isEmpty() ? "" : "\n)")
           .append(" || { rc=$?; echo ")
           .append(quote("==> Step failed: " + step.name() + ", exit code"))
-          .append(" \"$rc\"; exit \"$rc\"; }\n");
+          .append(" \"$rc\"; ")
+          .append(onFailure)
+          .append("exit \"$rc\"; }\n");
     } else {
       String port = String.format("%04X", step.port());
       s.append("i=0; until grep -Eqs '^ *[0-9]+: [0-9A-F]+:")
@@ -872,7 +1009,9 @@ public record Workflow(
                       + " not listening after "
                       + waitSeconds
                       + " seconds"))
-          .append("; exit 1; fi; sleep 1; done\n");
+          .append("; ")
+          .append(onFailure)
+          .append("exit 1; fi; sleep 1; done\n");
     }
     return s.toString();
   }

@@ -38,6 +38,8 @@ public class SettingsResource {
       MAX_TIMEOUT_MINUTES = 1440,
       MAX_CHECKOUT_MIB = 102400,
       MAX_CHECKOUT_FILES = 1000000,
+      MAX_ARTIFACT_MIB = 10240,
+      MAX_ARTIFACT_FILES = 100000,
       MIN_MEMORY_MIB = 64,
       MAX_MEMORY_MIB = 65536,
       MAX_CPUS = 16,
@@ -58,6 +60,9 @@ public class SettingsResource {
 
   /** Limits on a build's repository checkout. */
   public record Checkout(Integer maxSizeMib, Integer maxFiles) {}
+
+  /** Limits on what one build stores as artifacts. */
+  public record Artifacts(Integer maxSizeMib, Integer maxFiles) {}
 
   /** Limits applied to every build container. */
   public record Performance(Integer maxMemoryMib, Integer maxCpus, Integer maxPids) {}
@@ -302,6 +307,63 @@ public class SettingsResource {
             "maxFilesAfter",
             s.maxCheckoutFiles));
     return new Checkout(s.maxCheckoutMib, s.maxCheckoutFiles);
+  }
+
+  /** The artifact limits. */
+  @GET
+  @Path("/artifacts")
+  public Artifacts artifacts() {
+    requireAdmin();
+    return new Artifacts(runner.maxArtifactMib(), runner.maxArtifactFiles());
+  }
+
+  /** Saves the artifact limits. */
+  @PUT
+  @Path("/artifacts")
+  @Transactional
+  @Audited(
+      action = AuditAction.SETTINGS_ARTIFACTS_UPDATE,
+      target = AuditTargetType.SETTINGS,
+      summary = "Update artifact settings")
+  public Artifacts updateArtifacts(Artifacts input) {
+    requireAdmin();
+    if (input == null
+        || input.maxSizeMib() == null
+        || input.maxSizeMib() < 1
+        || input.maxSizeMib() > MAX_ARTIFACT_MIB) {
+      throw new BadRequestException(
+          "Artifact size must be between 1 and " + MAX_ARTIFACT_MIB + " MiB");
+    }
+    if (input.maxFiles() == null || input.maxFiles() < 1 || input.maxFiles() > MAX_ARTIFACT_FILES) {
+      throw new BadRequestException("Artifact files must be between 1 and " + MAX_ARTIFACT_FILES);
+    }
+    Settings s = Settings.findById(1L);
+    if (s == null) {
+      s = new Settings();
+      s.persist();
+    }
+    Integer previousSize = s.maxArtifactMib;
+    Integer previousFiles = s.maxArtifactFiles;
+    s.maxArtifactMib = input.maxSizeMib();
+    s.maxArtifactFiles = input.maxFiles();
+    audit.success(
+        AuditAction.SETTINGS_ARTIFACTS_UPDATE,
+        AuditTargetType.SETTINGS,
+        1L,
+        "artifacts",
+        (Long) null,
+        (String) null,
+        "Updated the artifact settings",
+        AuditDetails.of(
+            "maxSizeMibBefore",
+            previousSize,
+            "maxSizeMibAfter",
+            s.maxArtifactMib,
+            "maxFilesBefore",
+            previousFiles,
+            "maxFilesAfter",
+            s.maxArtifactFiles));
+    return new Artifacts(s.maxArtifactMib, s.maxArtifactFiles);
   }
 
   /** The container limits. */

@@ -55,6 +55,12 @@ public class Settings extends PanacheEntityBase {
   /** Null uses cisys.build.timeout-minutes. */
   public Integer buildTimeoutMinutes;
 
+  /** Null uses cisys.build.artifacts.max-mib. */
+  public Integer maxArtifactMib;
+
+  /** Null uses cisys.build.artifacts.max-files. */
+  public Integer maxArtifactFiles;
+
   /** Whether the timer queues builds for new commits. On by default. */
   @Column(nullable = false)
   public boolean pollEnabled = true;

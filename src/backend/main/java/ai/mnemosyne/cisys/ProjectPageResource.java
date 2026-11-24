@@ -13,6 +13,7 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotAuthorizedException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -20,6 +21,9 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -39,6 +43,7 @@ public class ProjectPageResource {
   @Inject BuildLogs logs;
   @Inject SecurityIdentity identity;
   @Inject UserDirectory directory;
+  @Inject BuildArtifacts artifacts;
 
   /** Anonymous callers may read at most this many bytes of one log in one response. */
   @ConfigProperty(name = "cisys.public.log-max-bytes", defaultValue = "2097152")
@@ -164,6 +169,74 @@ public class ProjectPageResource {
     return BuildReport.of(buildId).stream()
         .map(r -> new PageReport(r.type, r.name, r.format, r.content, r.truncated))
         .toList();
+  }
+
+  /** A build's artifacts; {@code truncated} when a limit cut them or the archive was damaged. */
+  public record PageArtifacts(boolean truncated, List<BuildArtifacts.Info> files) {}
+
+  /** The build's artifacts, by path. Downloads need a signed-in caller who can see the build. */
+  @GET
+  @Path("/builds/{buildId}/artifacts")
+  public PageArtifacts artifacts(
+      @PathParam("name") String name, @PathParam("buildId") Long buildId) {
+    Build b = signedInBuild(name, buildId);
+    return new PageArtifacts(artifacts.truncated(b.id), artifacts.list(b.id));
+  }
+
+  /** One artifact, always as a download, so the browser never renders it on this origin. */
+  @GET
+  @Path("/builds/{buildId}/artifacts/{artifactId}")
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  public Response artifact(
+      @PathParam("name") String name,
+      @PathParam("buildId") Long buildId,
+      @PathParam("artifactId") Long artifactId) {
+    Build b = signedInBuild(name, buildId);
+    BuildArtifacts.Info i = artifactId == null ? null : artifacts.find(b.id, artifactId);
+    if (i == null) {
+      throw new NotFoundException();
+    }
+    String file = i.path().substring(i.path().lastIndexOf('/') + 1);
+    return download(
+            out -> artifacts.streamTo(i.id(), out), MediaType.APPLICATION_OCTET_STREAM, file)
+        .build();
+  }
+
+  /** Every artifact of the build as one ZIP archive. */
+  @GET
+  @Path("/builds/{buildId}/artifacts.zip")
+  @Produces("application/zip")
+  public Response artifactsZip(@PathParam("name") String name, @PathParam("buildId") Long buildId) {
+    Build b = signedInBuild(name, buildId);
+    return download(
+            out -> artifacts.zipTo(b.id, out),
+            "application/zip",
+            name + "-" + (b.number == null ? b.id : b.number) + "-artifacts.zip")
+        .build();
+  }
+
+  private Build signedInBuild(String name, Long buildId) {
+    if (identity.isAnonymous()) {
+      throw new NotAuthorizedException("Bearer");
+    }
+    Project p = access.visible(name);
+    Build b = Build.findById(buildId);
+    if (b == null || !p.id.equals(b.projectId)) {
+      throw new NotFoundException();
+    }
+    return b;
+  }
+
+  private static Response.ResponseBuilder download(StreamingOutput body, String type, String file) {
+    String ascii = file.replaceAll("[^A-Za-z0-9._-]", "_");
+    String encoded = URLEncoder.encode(file, StandardCharsets.UTF_8).replace("+", "%20");
+    return Response.ok(body)
+        .type(type)
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded)
+        .header("X-Content-Type-Options", "nosniff")
+        .header("Content-Security-Policy", "sandbox");
   }
 
   /**

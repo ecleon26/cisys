@@ -167,6 +167,34 @@ The base image also needs `sh`. Installing the tools downloads packages on every
 
 `podman` and `podman-compose` are installed, but containers cannot yet be started from a step: steps run as the unprivileged user `65534:65534`, with no subordinate UID range, no direct network, and inside the build's own container storage.
 
+### Artifacts
+
+`artifacts` lists files and directories to keep after the build, for passed and failed builds alike:
+
+```yaml
+artifacts:
+  - name: Test results
+    path: target/surefire-reports
+  - name: Jars
+    path: target/*.jar
+```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `artifacts` | no | Top level only. At most 20 entries. |
+| `artifacts[].name` | yes | At most 200 characters, once in the list. |
+| `artifacts[].path` | yes | A file or directory relative to `/workspace`. A directory is kept with everything below it. `*` is allowed in the last part only and, as in the shell, does not match a leading dot. |
+
+* `path` is letters, digits and `. _ + @ -`, separated by `/`, with no `..`, `.` or empty parts, not starting with `/` or `-`, at most 1000 characters.
+* The paths are collected when a step fails, before the build stops, and after the last step, before its files are removed. The step's exit code and the build's status do not change. A build that is cancelled or times out keeps no artifacts.
+* A path that does not exist is a log line, `==> Artifact not found: …`, not a failure.
+* The build installs `tar` with the other tools, and the steps' files are archived as `65534:65534`. Symbolic links are kept as links in the archive and then skipped (`==> Artifact skipped: … (symbolic link)`), so nothing outside `/workspace` is read through one. Hard links, devices and other special files are skipped as well.
+* The log ends with `==> Artifacts: N files, M MiB`. A build stores at most the artifact limits, 100 MiB and 1000 files by default (see **Builds**); beyond that the rest is left out, the log shows `==> Artifacts truncated at …`, and the build page says so.
+* Artifacts are listed on the build page, each with its size and a download button, plus **Download all** as a ZIP file. Downloading needs a signed-in user who can see the build, also on a public project. Files are always downloaded, never shown in the browser.
+* Artifacts are kept with their build and deleted with it by retention or when the project is deleted; a pinned build keeps them.
+* Artifacts work with Podman only. With Docker, a build whose workflow has `artifacts` fails with `Artifacts are not supported with docker`.
+* The build mounts a directory at `/run/cisys-artifacts` for the archive. Steps can write there too; what is stored is checked the same way, but the space a step uses there while the build runs is not limited.
+
 ## How a workflow is built
 
 A build turns the workflow into a Containerfile and builds an image from it with Podman (or Docker):
@@ -259,5 +287,5 @@ The build page shows the workflow file the build read, under **Workflow**, and t
 
 * One workflow file per branch, at a fixed path. Builds can be started from the web UI or by the automatic-build timer; the global automatic-build settings, not the workflow file, decide whether new commits trigger builds and which branches are watched.
 * All jobs run one after another in a single image build. Jobs do not run in parallel and have no separate images.
-* Steps reach the network only through the HTTPS proxy, for the hosts an admin allowed, and there are no per-step timeouts, caches or artifacts. A project can keep one cache directory between builds, see **Cache** in the **Projects** chapter.
+* Steps reach the network only through the HTTPS proxy, for the hosts an admin allowed, and there are no per-step timeouts or per-step caches. A project can keep one cache directory between builds, see **Cache** in the **Projects** chapter.
 * `dependencies` names one package per entry for the container's distribution; there is no per-distribution choice of package names in a single workflow.

@@ -409,6 +409,28 @@ CREATE TABLE IF NOT EXISTS buildreport (
 CREATE INDEX IF NOT EXISTS buildreport_build ON buildreport (buildid);
 CREATE SEQUENCE IF NOT EXISTS buildreport_seq START WITH 1 INCREMENT BY 50;
 
+-- Files a build's workflow listed under artifacts, each in a large object. They go with the build,
+-- and the lo_manage trigger unlinks the content. Only BuildArtifacts reads and writes them.
+CREATE TABLE IF NOT EXISTS buildartifact (
+    id bigint GENERATED ALWAYS AS IDENTITY,
+    buildid bigint NOT NULL,
+    name character varying(200) NOT NULL,
+    path character varying(1000) NOT NULL,
+    size bigint NOT NULL,
+    sha256 character(64) NOT NULL,
+    dataoid lo NOT NULL,
+    createdat timestamp(6) with time zone NOT NULL,
+    CONSTRAINT buildartifact_pkey PRIMARY KEY (id),
+    CONSTRAINT buildartifact_build FOREIGN KEY (buildid) REFERENCES build (id) ON DELETE CASCADE,
+    CONSTRAINT buildartifact_path UNIQUE (buildid, path)
+);
+CREATE OR REPLACE TRIGGER buildartifact_lo_manage
+    BEFORE UPDATE OF dataoid OR DELETE ON buildartifact
+    FOR EACH ROW EXECUTE FUNCTION lo_manage(dataoid);
+ALTER TABLE build ADD COLUMN IF NOT EXISTS artifactstruncated boolean NOT NULL DEFAULT false;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxartifactmib integer;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS maxartifactfiles integer;
+
 -- Who may create, edit and delete articles: ADMIN, LEAD (and admins) or MEMBER (any CISys role).
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS articleeditors character varying(16) NOT NULL DEFAULT 'ADMIN';
 DO $$

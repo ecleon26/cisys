@@ -29,6 +29,7 @@ public enum AuditAction {
   SETTINGS_RETENTION_UPDATE("settings.retention.update"),
   SETTINGS_BUILDS_UPDATE("settings.builds.update"),
   SETTINGS_CHECKOUT_UPDATE("settings.checkout.update"),
+  SETTINGS_ARTIFACTS_UPDATE("settings.artifacts.update"),
   SETTINGS_PERFORMANCE_UPDATE("settings.performance.update"),
   SETTINGS_POLLING_UPDATE("settings.polling.update"),
   SETTINGS_PULL_REQUESTS_UPDATE("settings.pullrequests.update"),

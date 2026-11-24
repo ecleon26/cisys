@@ -159,6 +159,83 @@ public class BuildRunner {
     return v != null ? v : maxCheckoutFiles;
   }
 
+  @ConfigProperty(name = "cisys.build.artifacts.max-mib", defaultValue = "100")
+  int maxArtifactMib = 100;
+
+  @ConfigProperty(name = "cisys.build.artifacts.max-files", defaultValue = "1000")
+  int maxArtifactFiles = 1000;
+
+  int maxArtifactMib() {
+    Integer v = Settings.current().maxArtifactMib;
+    return v != null ? v : maxArtifactMib;
+  }
+
+  int maxArtifactFiles() {
+    Integer v = Settings.current().maxArtifactFiles;
+    return v != null ? v : maxArtifactFiles;
+  }
+
+  @Inject BuildArtifacts artifacts;
+
+  /**
+   * Stores what the collect script wrote. The steps could also have written there, so the archive
+   * must be a regular file, and is opened without following links; the build's processes have all
+   * ended by now. A failure is only logged, as artifacts never change the build's result.
+   */
+  void collectArtifacts(long id, Workflow workflow, Path dir, Consumer<String> log) {
+    Path archive = dir.resolve(Workflow.ARTIFACT_ARCHIVE);
+    try {
+      java.nio.file.attribute.BasicFileAttributes a;
+      try {
+        a =
+            Files.readAttributes(
+                archive,
+                java.nio.file.attribute.BasicFileAttributes.class,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS);
+      } catch (java.nio.file.NoSuchFileException e) {
+        return;
+      }
+      if (!a.isRegularFile()) {
+        log.accept(
+            "==> Artifacts skipped: " + Workflow.ARTIFACT_ARCHIVE + " is not a regular file");
+        return;
+      }
+      int[] limits =
+          QuarkusTransaction.requiringNew()
+              .call(() -> new int[] {maxArtifactMib(), maxArtifactFiles()});
+      ArtifactArchive.Result r;
+      try (InputStream in =
+          new java.io.BufferedInputStream(
+              Files.newInputStream(archive, java.nio.file.LinkOption.NOFOLLOW_LINKS))) {
+        r =
+            artifacts.store(
+                id, workflow.artifacts(), in, limits[0] * 1024L * 1024L, limits[1], log);
+      }
+      log.accept(
+          "==> Artifacts: "
+              + r.files()
+              + (r.files() == 1 ? " file, " : " files, ")
+              + String.format(Locale.ROOT, "%.1f", r.bytes() / 1048576.0)
+              + " MiB");
+    } catch (Exception e) {
+      Log.warnf(e, "Artifacts of build %d could not be stored", id);
+      log.accept("==> Could not store the artifacts (" + e.getClass().getSimpleName() + ")");
+    }
+  }
+
+  /** The host directory mounted at {@link Workflow#ARTIFACT_DIR}, writable by the steps' user. */
+  static Path artifactDirectory(Path dir) throws IOException {
+    Path artifacts = Files.createDirectory(dir.resolve("artifacts"));
+    try {
+      // The build's user is mapped to another host user; the parent directory keeps other host
+      // users out.
+      Files.setPosixFilePermissions(
+          artifacts, java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+    } catch (UnsupportedOperationException ignored) {
+    }
+    return artifacts;
+  }
+
   @ConfigProperty(name = "cisys.build.max-memory-mib", defaultValue = "1024")
   int maxMemoryMib = 1024;
 
@@ -1223,6 +1300,9 @@ public class BuildRunner {
       QuarkusTransaction.requiringNew()
           .run(() -> Build.update("workflow = ?1 where id = ?2", text, id));
       Workflow workflow = Workflow.parse(text);
+      if (workflow.hasArtifacts() && !runtime.equals("podman")) {
+        throw new IllegalArgumentException("Artifacts are not supported with docker");
+      }
       String base = workflow.container();
       ImageReference.Resolved from = ImageReference.resolve(base, localImages());
       QuarkusTransaction.requiringNew()
@@ -1271,6 +1351,7 @@ public class BuildRunner {
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
       Streamed result;
       long outputBytes;
+      Path artifactDir = null;
       if (podman) {
         Path file = Files.writeString(dir.resolve("Dockerfile"), containerfile);
         baseTag = baseTag(id);
@@ -1279,6 +1360,10 @@ public class BuildRunner {
         if (systemdCgroups()) {
           slice = slice(id);
           build.add("--cgroup-parent=" + slice);
+        }
+        if (workflow.hasArtifacts()) {
+          artifactDir = artifactDirectory(dir);
+          build.add("--volume=" + artifactDir + ":" + Workflow.ARTIFACT_DIR + ":rw,Z");
         }
         if (proxy != null) {
           build.add("--volume=" + proxy.directory() + ":" + Workflow.PROXY_DIR + ":ro,Z");
@@ -1377,6 +1462,10 @@ public class BuildRunner {
           saveCache(projectId, name, dir, log::line);
         }
       }
+      // A timed-out build was killed, possibly while it wrote the archive.
+      if (!handle.cancelled && !result.timeout() && artifactDir != null) {
+        collectArtifacts(id, workflow, artifactDir, log::line);
+      }
       if (!handle.cancelled) {
         runReports(id, workflow, workspace, log::line);
       }
@@ -1457,7 +1546,14 @@ public class BuildRunner {
       if (dir != null) {
         try {
           delete(dir);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+          // Directories a step made in the artifact mount belong to a user of Podman's namespace.
+          if (runtime.equals("podman")) {
+            try {
+              command(List.of(runtime, "unshare", "rm", "-rf", dir.toString()), 60, 4096);
+            } catch (Exception ignored) {
+            }
+          }
         }
       }
       // A log failure must not stop the status update.
