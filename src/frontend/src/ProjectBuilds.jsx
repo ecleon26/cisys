@@ -8,6 +8,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Check,
+  Copy,
   GitBranch,
   Hammer,
   LockKeyhole,
@@ -15,12 +17,14 @@ import {
   Pin,
 } from "lucide-react";
 import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 import { Card, CardContent } from "./components/ui/card";
 import PageHeader from "./components/layout/PageHeader";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import BuildStatus from "./BuildStatus";
 import ProjectCommits from "./ProjectCommits";
 import {
+  badgeMarkdown,
   buildPath,
   duration,
   pullRequestLabel,
@@ -38,6 +42,7 @@ import {
 export default function ProjectBuilds({
   name,
   load,
+  apiUrl = "",
   onOpenBuild,
   onBuild,
   onNotFound,
@@ -54,6 +59,7 @@ export default function ProjectBuilds({
   const [buildsBranch, setBuildsBranch] = useState("");
   const [startingBranch, setStartingBranch] = useState(null);
   const [reload, setReload] = useState(0);
+  const [badgeCopied, setBadgeCopied] = useState(false);
   const projectId = page?.project?.id;
   // Latest page, so the polling loop can decide whether a build is still active without restarting.
   const pageRef = useRef(undefined);
@@ -170,6 +176,22 @@ export default function ProjectBuilds({
       setStartingBranch(null);
     }
   };
+  const copyBadge = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        badgeMarkdown(
+          apiUrl,
+          window.location.origin,
+          project.name,
+          activeBranch,
+        ),
+      );
+      setBadgeCopied(true);
+      window.setTimeout(() => setBadgeCopied(false), 1500);
+    } catch {
+      setError("Unable to copy the badge Markdown.");
+    }
+  };
   const openBuild = (build) =>
     onOpenBuild?.(project.name, build.branch || activeBranch, build.id);
 
@@ -196,6 +218,21 @@ export default function ProjectBuilds({
               )}
               {project.privateRepository ? "Private" : "Public"}
             </Badge>
+            {!project.privateRepository && activeBranch && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void copyBadge()}
+              >
+                {badgeCopied ? (
+                  <Check size={14} aria-hidden="true" />
+                ) : (
+                  <Copy size={14} aria-hidden="true" />
+                )}
+                {badgeCopied ? "Copied" : "Copy badge Markdown"}
+              </Button>
+            )}
           </>
         }
       />

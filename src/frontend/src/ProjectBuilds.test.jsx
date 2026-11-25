@@ -73,6 +73,50 @@ const commitCalls = (load) =>
   load.mock.calls.filter(([path]) => path.includes("/commits?"));
 const FIND = { timeout: 5000 };
 
+describe("ProjectBuilds badge", () => {
+  it("copies badge Markdown for the selected branch of a public project", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(
+      <ProjectBuilds
+        name="demo"
+        load={projectLoad()}
+        apiUrl="https://ci.example/api"
+        onNotFound={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Copy badge Markdown" }, FIND),
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        `[![build](https://ci.example/api/badge/demo/main.svg)](${window.location.origin}/demo/)`,
+      ),
+    );
+    expect(await screen.findByText("Copied", FIND)).toBeTruthy();
+  });
+
+  it("has no badge button for private projects", async () => {
+    const base = projectLoad();
+    const load = vi.fn(async (path) => {
+      const data = await base(path);
+      return data.project
+        ? { ...data, project: { ...data.project, privateRepository: true } }
+        : data;
+    });
+    render(<Harness load={load} />);
+
+    expect(await screen.findByText("No builds", FIND)).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Copy badge Markdown" }),
+    ).toBeNull();
+  });
+});
+
 describe("ProjectBuilds tabs", () => {
   it("does not fetch commits until the Commits tab is opened", async () => {
     const load = projectLoad();

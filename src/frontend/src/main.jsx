@@ -510,6 +510,7 @@ function AppPage() {
               tab={projectTab}
               onTabChange={changeProjectTab}
               load={publicJson}
+              apiUrl={API}
               onOpenBuild={openBuild}
               onNotFound={showFrontPage}
             />
@@ -734,6 +735,7 @@ function AppPage() {
             tab={projectTab}
             onTabChange={changeProjectTab}
             load={api}
+            apiUrl={API}
             onOpenBuild={openBuild}
             onBuild={canStartBuilds ? startBranchBuild : undefined}
             onNotFound={showFrontPage}

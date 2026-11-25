@@ -16,6 +16,15 @@ export function buildPath(name, branch, id) {
   return `/${encodeURIComponent(name)}/${encodeURIComponent(branch || NO_BRANCH)}/build/${id}`;
 }
 
+/** README Markdown for a project's build badge. Slashes in the branch stay as path separators. */
+export function badgeMarkdown(apiUrl, origin, name, branch) {
+  const api = new URL(apiUrl || "/api", origin).href.replace(/\/$/, "");
+  const branchPath = branch.split("/").map(encodeURIComponent).join("/");
+  const image = `${api}/badge/${encodeURIComponent(name)}/${branchPath}.svg`;
+  const page = `${origin}/${encodeURIComponent(name)}/`;
+  return `[![build](${image})](${page})`;
+}
+
 /** Turns the branch segment of a build URL back into a branch name ("" when the build has none). */
 export function branchFromSegment(segment) {
   return segment === NO_BRANCH ? "" : segment;
