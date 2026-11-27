@@ -84,4 +84,54 @@ describe("ProjectBuild re-run", () => {
     expect(await screen.findByText(/queue is full/)).toBeTruthy();
     expect(onOpenBuild).not.toHaveBeenCalled();
   });
+
+  it("ignores a stale response when switching to another build", async () => {
+    let resolveFirst;
+    const load = vi.fn((path) => {
+      if (path.endsWith("/builds/42")) {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      if (path.endsWith("/builds/43")) {
+        return Promise.resolve({ ...build, id: 43, number: 6 });
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const onNotFound = vi.fn();
+
+    const { rerender } = render(
+      <ProjectBuild
+        name="demo"
+        branch="main"
+        buildId={42}
+        load={load}
+        onBack={() => {}}
+        onOpenBuild={() => {}}
+        onNotFound={onNotFound}
+      />,
+    );
+    await waitFor(() =>
+      expect(load).toHaveBeenCalledWith("/project-pages/demo/builds/42"),
+    );
+
+    rerender(
+      <ProjectBuild
+        name="demo"
+        branch="main"
+        buildId={43}
+        load={load}
+        onBack={() => {}}
+        onOpenBuild={() => {}}
+        onNotFound={onNotFound}
+      />,
+    );
+    expect(await screen.findByText("Build #6")).toBeTruthy();
+
+    resolveFirst({ ...build, id: 42, number: 5 });
+    await Promise.resolve();
+    expect(screen.getByText("Build #6")).toBeTruthy();
+    expect(screen.queryByText("Build #5")).toBeNull();
+    expect(onNotFound).not.toHaveBeenCalled();
+  });
 });

@@ -6,7 +6,7 @@
  *   OF THE PROGRAM CONSTITUTES RECIPIENT'S ACCEPTANCE OF THIS AGREEMENT.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -95,16 +95,20 @@ export default function ProjectBuild({
   const [pinning, setPinning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const requestRef = useRef(0);
 
   const loadBuild = useCallback(async () => {
+    const request = ++requestRef.current;
     try {
-      setBuild(
-        await load(
-          `/project-pages/${encodeURIComponent(name)}/builds/${buildId}`,
-        ),
+      const data = await load(
+        `/project-pages/${encodeURIComponent(name)}/builds/${buildId}`,
       );
+      // A slow, older response must not overwrite or 404-redirect a newly opened build.
+      if (request !== requestRef.current) return;
+      setBuild(data);
       setError("");
     } catch (e) {
+      if (request !== requestRef.current) return;
       if (e.status === 404) onNotFound();
       else setError(e.message || "Unable to load the build.");
     }
@@ -158,9 +162,13 @@ export default function ProjectBuild({
   }
 
   useEffect(() => {
+    requestRef.current += 1;
+    setBuild(undefined);
+    setError("");
     const initial = setTimeout(loadBuild, 0);
     const timer = setInterval(loadBuild, 5000);
     return () => {
+      requestRef.current += 1;
       clearTimeout(initial);
       clearInterval(timer);
     };
