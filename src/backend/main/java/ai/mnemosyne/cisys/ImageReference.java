@@ -107,16 +107,20 @@ public final class ImageReference {
   }
 
   /**
-   * A repository without a registry is the official image on Docker Hub, for example {@code
-   * alpine}.
+   * A repository without a registry is on Docker Hub, and a single name there is an official image,
+   * for example {@code alpine} and {@code docker.io/alpine} are both {@code
+   * docker.io/library/alpine}. {@code index.docker.io} is an older name of {@code docker.io}.
    */
   static String official(String repository) {
     int slash = repository.indexOf('/');
     String first = slash < 0 ? "" : repository.substring(0, slash);
-    if (first.contains(".") || first.contains(":") || first.equals("localhost")) {
+    String path = repository;
+    if (first.equals("docker.io") || first.equals("index.docker.io")) {
+      path = repository.substring(slash + 1);
+    } else if (first.contains(".") || first.contains(":") || first.equals("localhost")) {
       return repository;
     }
-    return "docker.io/" + (slash < 0 ? "library/" : "") + repository;
+    return "docker.io/" + (path.contains("/") ? "" : "library/") + path;
   }
 
   private static Resolved resolved(String id, List<Local> images) {

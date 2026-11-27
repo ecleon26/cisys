@@ -14,6 +14,7 @@ Mohamed Hamed <alkmohamed40@gmail.com>
 Mohammed Naser <mohammednaser2826@gmail.com>
 Yousef Metawea <metaweayousef@gmail.com>
 Yousuf Mahmoud <yusufmahmoud.dev@gmail.com>
+saviourmk <n.melo1013@gmail.com>
 ```
 
 ## Contributing

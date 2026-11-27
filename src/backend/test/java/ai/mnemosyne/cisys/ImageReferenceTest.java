@@ -48,6 +48,22 @@ class ImageReferenceTest {
   }
 
   @Test
+  void dockerHubNamesResolveAsDockerNormalizesThem() {
+    // docker.io/alpine is docker.io/library/alpine, and index.docker.io is docker.io.
+    for (String base :
+        List.of(
+            "docker.io/alpine",
+            "docker.io/alpine:3.23",
+            "index.docker.io/alpine:3.23",
+            "index.docker.io/library/alpine:3.23")) {
+      assertEquals(ALPINE, ImageReference.resolve(base, IMAGES).id(), base);
+    }
+    assertEquals(VALKEY, ImageReference.resolve("index.docker.io/valkey/valkey", IMAGES).id());
+    var docker = List.of(new ImageReference.Local("alpine", "3.23", ALPINE));
+    assertEquals(ALPINE, ImageReference.resolve("docker.io/alpine:3.23", docker).id());
+  }
+
+  @Test
   void resolvesNonLibraryImages() {
     assertEquals(VALKEY, ImageReference.resolve("valkey/valkey", IMAGES).id());
     assertEquals(VALKEY, ImageReference.resolve("valkey/valkey:8-alpine", IMAGES).id());
