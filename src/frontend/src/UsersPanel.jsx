@@ -6,7 +6,7 @@
  *   OF THE PROGRAM CONSTITUTES RECIPIENT'S ACCEPTANCE OF THIS AGREEMENT.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronLeft,
@@ -57,13 +57,17 @@ export default function UsersPanel({ api, user, tabs }) {
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const listRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++listRequest.current;
     const query = new URLSearchParams({ first, max: PAGE_SIZE });
     if (search.trim()) query.set("search", search.trim());
     if (role) query.set("role", role);
     if (project) query.set("project", project);
     const data = await api(`/users?${query}`);
+    // A slow, older response must not overwrite a newer filter or page.
+    if (request !== listRequest.current) return;
     const lastPage = Math.max(
       0,
       Math.floor((data.total - 1) / PAGE_SIZE) * PAGE_SIZE,
@@ -73,6 +77,7 @@ export default function UsersPanel({ api, user, tabs }) {
       return;
     }
     setPage(data);
+    setError("");
   }, [api, first, search, role, project]);
 
   useEffect(() => {
@@ -82,11 +87,15 @@ export default function UsersPanel({ api, user, tabs }) {
   }, [api]);
 
   useEffect(() => {
+    let active = true;
     const timer = setTimeout(
-      () => load().catch((e) => setError(e.message)),
+      () => load().catch((e) => active && setError(e.message)),
       200,
     );
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [load]);
 
   async function run(action) {

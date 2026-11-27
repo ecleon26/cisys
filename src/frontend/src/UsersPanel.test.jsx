@@ -215,4 +215,61 @@ describe("UsersPanel", () => {
       confirmSpy.mockRestore();
     }
   });
+
+  it("ignores a stale user list response that arrives after a newer filter", async () => {
+    let resolveSlow;
+    const slowFirst = new Promise((resolve) => {
+      resolveSlow = resolve;
+    });
+    const load = vi.fn((path) => {
+      if (path === "/users/projects") return Promise.resolve([]);
+      if (path.includes("search=beta")) {
+        return Promise.resolve({
+          total: 1,
+          users: [
+            {
+              id: "b",
+              username: "beta-user",
+              role: "member",
+              enabled: true,
+              manageable: true,
+              projects: [],
+            },
+          ],
+        });
+      }
+      return slowFirst;
+    });
+
+    render(
+      <UsersPanel api={load} user={{ roles: ["admin"], subject: "admin" }} />,
+    );
+    await waitFor(() =>
+      expect(
+        load.mock.calls.filter(([p]) => p.startsWith("/users?")),
+      ).toHaveLength(1),
+    );
+
+    fireEvent.change(screen.getByLabelText("Search users"), {
+      target: { value: "beta" },
+    });
+    expect(await screen.findByText("beta-user")).toBeTruthy();
+
+    resolveSlow({
+      total: 1,
+      users: [
+        {
+          id: "s",
+          username: "stale-user",
+          role: "member",
+          enabled: true,
+          manageable: true,
+          projects: [],
+        },
+      ],
+    });
+    await Promise.resolve();
+    expect(screen.getByText("beta-user")).toBeTruthy();
+    expect(screen.queryByText("stale-user")).toBeNull();
+  });
 });
