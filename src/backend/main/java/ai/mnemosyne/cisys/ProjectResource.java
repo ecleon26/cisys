@@ -442,6 +442,10 @@ public class ProjectResource {
     if (!admin && input.credentialRef() != null && !input.credentialRef().isBlank()) {
       throw new ForbiddenException();
     }
+    // Making a private project public exposes its builds and logs to everyone.
+    if (!admin && previousPrivate && !input.privateRepository()) {
+      throw new ForbiddenException();
+    }
     // A lead must not carry the admin-set credential to a new repository.
     boolean urlChanged = !Objects.equals(RepositoryUrls.normalize(p.repositoryUrl), url);
     p.name = name;

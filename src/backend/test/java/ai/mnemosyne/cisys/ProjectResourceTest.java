@@ -729,6 +729,70 @@ class ProjectResourceTest {
   }
 
   @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
+  void leadCannotMakeAPrivateProjectPublic() {
+    Long id = project("lead-id", true);
+    String url = "https://github.com/org/lead-public-" + java.util.UUID.randomUUID() + ".git";
+    given()
+        .contentType("application/json")
+        .body(
+            "{\"name\":\"lead-public-"
+                + id
+                + "\",\"repositoryUrl\":\""
+                + url
+                + "\",\"privateRepository\":false}")
+        .when()
+        .put("/api/projects/" + id)
+        .then()
+        .statusCode(403);
+    QuarkusTransaction.requiringNew()
+        .run(() -> assertTrue(Project.<Project>findById(id).privateRepository));
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
+  void leadEditsAPublicProjectThatStaysPublic() {
+    Long id = project("lead-id", false);
+    String url = "https://github.com/org/lead-stays-" + java.util.UUID.randomUUID() + ".git";
+    given()
+        .contentType("application/json")
+        .body(
+            "{\"name\":\"lead-stays-"
+                + id
+                + "\",\"repositoryUrl\":\""
+                + url
+                + "\",\"privateRepository\":false}")
+        .when()
+        .put("/api/projects/" + id)
+        .then()
+        .statusCode(200)
+        .body("privateRepository", equalTo(false));
+  }
+
+  @Test
+  @TestSecurity(user = "admin", roles = "admin")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "admin-id")})
+  void adminMakesAPrivateProjectPublic() {
+    Long id = project("other-id", true);
+    String url = "https://github.com/org/admin-public-" + java.util.UUID.randomUUID() + ".git";
+    given()
+        .contentType("application/json")
+        .body(
+            "{\"name\":\"admin-public-"
+                + id
+                + "\",\"repositoryUrl\":\""
+                + url
+                + "\",\"privateRepository\":false}")
+        .when()
+        .put("/api/projects/" + id)
+        .then()
+        .statusCode(200)
+        .body("privateRepository", equalTo(false));
+  }
+
+  @Test
   @TestSecurity(user = "admin", roles = "admin")
   @JwtSecurity(claims = {@Claim(key = "sub", value = "admin-id")})
   void adminSetsAndClearsCredentialThroughUpdate() {

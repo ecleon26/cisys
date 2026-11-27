@@ -121,6 +121,31 @@ describe("ProjectSettings", () => {
     );
     expect(screen.queryByText("Automatic builds")).toBeNull();
   });
+
+  it("does not let a lead make a private project public", () => {
+    renderSettings(
+      vi.fn(async () => []),
+      {
+        ...project(),
+        privateRepository: true,
+      },
+    );
+    expect(screen.getByLabelText("Private project").disabled).toBe(true);
+  });
+
+  it("lets a lead make a public project private", () => {
+    renderSettings(vi.fn(async () => []));
+    expect(screen.getByLabelText("Private project").disabled).toBe(false);
+  });
+
+  it("lets an admin make a private project public", () => {
+    renderSettings(
+      vi.fn(async () => []),
+      { ...project(), privateRepository: true },
+      true,
+    );
+    expect(screen.getByLabelText("Private project").disabled).toBe(false);
+  });
 });
 
 function renderUnified(
