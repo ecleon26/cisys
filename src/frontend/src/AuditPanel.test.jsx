@@ -394,4 +394,63 @@ describe("AuditPanel", () => {
     render(<AuditPanel api={failing} />);
     expect((await screen.findByRole("alert")).textContent).toContain("Nope");
   });
+
+  it("ignores a stale audit list response that arrives after a newer filter", async () => {
+    let resolveSlow;
+    const slowFirst = new Promise((resolve) => {
+      resolveSlow = resolve;
+    });
+    const load = vi.fn((path) => {
+      if (path.includes("search=beta")) {
+        return Promise.resolve({
+          total: 1,
+          events: [{ ...event, id: 9, summary: "Filtered beta event" }],
+        });
+      }
+      return slowFirst;
+    });
+
+    render(<AuditPanel api={load} />);
+    await waitFor(() => expect(listCalls(load)).toHaveLength(1));
+
+    fireEvent.change(screen.getByLabelText("Search the audit log"), {
+      target: { value: "beta" },
+    });
+    expect(await screen.findByText("Filtered beta event")).toBeTruthy();
+
+    resolveSlow({
+      total: 1,
+      events: [{ ...event, id: 1, summary: "Stale initial event" }],
+    });
+    await Promise.resolve();
+    expect(screen.getByText("Filtered beta event")).toBeTruthy();
+    expect(screen.queryByText("Stale initial event")).toBeNull();
+  });
+
+  it("ignores a stale detail response when another event is opened", async () => {
+    let resolveFirstDetail;
+    const load = vi.fn((path) => {
+      if (path === "/audit/7") {
+        return new Promise((resolve) => {
+          resolveFirstDetail = resolve;
+        });
+      }
+      if (path === "/audit/8") {
+        return Promise.resolve({ ...otherEvent, details: { which: "second" } });
+      }
+      return Promise.resolve({ total: 2, events: [event, otherEvent] });
+    });
+
+    render(<AuditPanel api={load} />);
+    await screen.findByText("Created project alpha");
+
+    fireEvent.click(screen.getByLabelText("Show details for event 7"));
+    fireEvent.click(screen.getByLabelText("Show details for event 8"));
+    expect(await screen.findByText(/"which": "second"/)).toBeTruthy();
+
+    resolveFirstDetail({ ...event, details: { which: "first" } });
+    await Promise.resolve();
+    expect(screen.getByText(/"which": "second"/)).toBeTruthy();
+    expect(screen.queryByText(/"which": "first"/)).toBeNull();
+  });
 });

@@ -6,7 +6,7 @@
  *   OF THE PROGRAM CONSTITUTES RECIPIENT'S ACCEPTANCE OF THIS AGREEMENT.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ScrollText, X } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -69,8 +69,11 @@ export default function AuditPanel({ api }) {
   const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState("");
+  const listRequest = useRef(0);
+  const detailRequest = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++listRequest.current;
     const query = new URLSearchParams({ first, max: pageSize });
     if (search.trim().length >= 2) query.set("search", search.trim());
     if (action.trim()) query.set("action", action.trim());
@@ -80,16 +83,23 @@ export default function AuditPanel({ api }) {
     if (after) query.set("from", after);
     const before = instant(to);
     if (before) query.set("to", before);
-    setPage(await api(`/audit?${query}`));
+    const data = await api(`/audit?${query}`);
+    // A slow, older response must not overwrite a newer filter or page.
+    if (request !== listRequest.current) return;
+    setPage(data);
     setError("");
   }, [api, first, pageSize, search, action, outcome, targetType, from, to]);
 
   useEffect(() => {
+    let active = true;
     const timer = setTimeout(
-      () => load().catch((e) => setError(e.message)),
+      () => load().catch((e) => active && setError(e.message)),
       200,
     );
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [load]);
 
   function filter(setter) {
@@ -100,15 +110,18 @@ export default function AuditPanel({ api }) {
   }
 
   async function toggle(event) {
+    const request = ++detailRequest.current;
     if (selected?.id === event.id) {
       setSelected(null);
       return;
     }
     setError("");
     try {
-      setSelected(await api(`/audit/${event.id}`));
+      const detail = await api(`/audit/${event.id}`);
+      if (request !== detailRequest.current) return;
+      setSelected(detail);
     } catch (e) {
-      setError(e.message);
+      if (request === detailRequest.current) setError(e.message);
     }
   }
 
