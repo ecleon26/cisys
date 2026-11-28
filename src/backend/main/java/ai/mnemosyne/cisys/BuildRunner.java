@@ -312,17 +312,21 @@ public class BuildRunner {
    * meanwhile wins.
    */
   void persistCompletion(Completion r) {
-    Build.update(
-        "status = case when cancelRequested = true then ?9 else ?1 end, revision = ?2, exitCode = ?3, imageDigest = ?4, logTruncated = ?5, finishedAt = ?6 where id = ?7 and status = ?8",
-        r.status(),
-        r.revision(),
-        r.exitCode(),
-        r.imageDigest(),
-        r.logTruncated(),
-        r.finishedAt(),
-        r.id(),
-        Build.Status.RUNNING,
-        Build.Status.CANCELLED);
+    int updated =
+        Build.update(
+            "status = case when cancelRequested = true then ?9 else ?1 end, revision = ?2, exitCode = ?3, imageDigest = ?4, logTruncated = ?5, finishedAt = ?6 where id = ?7 and status = ?8",
+            r.status(),
+            r.revision(),
+            r.exitCode(),
+            r.imageDigest(),
+            r.logTruncated(),
+            r.finishedAt(),
+            r.id(),
+            Build.Status.RUNNING,
+            Build.Status.CANCELLED);
+    if (updated == 1) {
+      WebhookService.enqueue(r.id());
+    }
   }
 
   /** A build this runner executes, with the container command currently running for it. */
@@ -462,6 +466,9 @@ public class BuildRunner {
             b.finishedAt = Instant.now();
             if (failure != null) {
               b.logTruncated = true;
+            }
+            if (!cancelled) {
+              WebhookService.enqueue(id, WebhookService.SERVER_RESTART);
             }
           });
     }

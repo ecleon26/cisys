@@ -54,6 +54,36 @@ UPDATE project SET name = 'new-name' WHERE name = 'old name';
 
 The repository must be on an allowed host and must not resolve to a loopback, private, link-local or metadata address. By default only `github.com` and `gitlab.com` on port 443 are allowed; the backend settings `cisys.git.allowed-hosts`, `cisys.git.allowed-ports` and `cisys.git.allowed-networks` extend that list. A local server with a self-signed certificate can be named in `cisys.git.insecure-tls-hosts`; adding its certificate to the JVM truststore is preferred.
 
+## Webhooks
+
+A project `LEAD` or an administrator adds webhooks on the project's settings page (Webhooks tab), at most 10 per project. Each webhook receives a JSON `POST` for the events it is subscribed to:
+
+* **Finished** — every passed or failed build (`build.passed` or `build.failed`).
+* **Failed** — a failed build (`build.failed`).
+* **Fixed** — a passed build whose previous finished build on the same branch, or of the same pull request, failed (`build.fixed`).
+
+Cancelled builds send nothing. A build sends at most one request per webhook, with the most specific event. A build that was running when the server restarted is marked failed and sends `build.failed` with `"reason": "server_restart"`; otherwise `reason` is `null`.
+
+```json
+{
+  "event": "build.fixed",
+  "delivery": 1201,
+  "reason": null,
+  "project": { "id": 51, "name": "my-project" },
+  "build": {
+    "id": 3401, "number": 42, "status": "PASSED", "trigger": "POLL",
+    "branch": "main", "revision": "4f2c…", "pullRequest": null, "exitCode": 0,
+    "startedAt": "2026-11-27T10:00:00Z", "finishedAt": "2026-11-27T10:03:12Z"
+  }
+}
+```
+
+Every request carries `X-Cisys-Event`, `X-Cisys-Delivery`, `X-Cisys-Timestamp` (Unix seconds) and `X-Cisys-Signature: sha256=<hex>`, the HMAC-SHA256 of `<timestamp>.<body>` keyed with the webhook's secret. The secret is shown once, when the webhook is created or its secret is rotated. A receiver should recompute the signature, compare it in constant time and reject old timestamps.
+
+Any `2xx` answer counts as delivered. Other answers and network errors are retried after 30 seconds, 2, 8 and 32 minutes, five attempts in all; a `3xx` (redirects are not followed) and a `4xx` other than `408` and `429` are not retried. Each attempt must finish within 20 seconds, and up to four are sent at once, so a slow endpoint does not delay the others. Deliveries never change a build's result, and the tab lists the latest 50 of them. Finished deliveries are kept for 30 days or until their build is deleted.
+
+The URL must use HTTPS on an allowed port (`cisys.webhooks.allowed-ports`, default 443) and must not resolve to a loopback, private, link-local or metadata address. It is checked when it is saved and again before every attempt, and the request goes to the address that check approved. Any public host is allowed unless `cisys.webhooks.allowed-hosts` lists hosts; `cisys.webhooks.allowed-networks` allows private CIDR ranges on purpose. The URL is shown only as `https://host/…`, because paths often carry a token.
+
 ## Ownership
 
 Two different things are recorded per project:

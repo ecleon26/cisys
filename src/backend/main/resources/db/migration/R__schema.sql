@@ -559,3 +559,45 @@ CREATE TABLE IF NOT EXISTS reportplugin (
     CONSTRAINT reportplugin_type_key UNIQUE (type)
 );
 CREATE SEQUENCE IF NOT EXISTS reportplugin_seq START WITH 1 INCREMENT BY 50;
+
+-- Webhooks a project LEAD configured. The secret signs each payload, so it is stored as is.
+CREATE TABLE IF NOT EXISTS projectwebhook (
+    id bigint NOT NULL,
+    projectid bigint NOT NULL,
+    url character varying(2048) NOT NULL,
+    secret character varying(64) NOT NULL,
+    onfinished boolean NOT NULL,
+    onfailed boolean NOT NULL,
+    onfixed boolean NOT NULL,
+    createdat timestamp(6) with time zone NOT NULL,
+    CONSTRAINT projectwebhook_pkey PRIMARY KEY (id),
+    CONSTRAINT projectwebhook_project FOREIGN KEY (projectid) REFERENCES project (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS projectwebhook_project ON projectwebhook (projectid);
+CREATE SEQUENCE IF NOT EXISTS projectwebhook_seq START WITH 1 INCREMENT BY 50;
+
+-- One row per webhook and build event: written with the build result, then sent and retried by
+-- WebhookDispatcher. Rows go with their webhook or build.
+CREATE TABLE IF NOT EXISTS webhookdelivery (
+    id bigint NOT NULL,
+    webhookid bigint NOT NULL,
+    buildid bigint NOT NULL,
+    event character varying(20) NOT NULL,
+    payload character varying(4000) NOT NULL,
+    status character varying(16) NOT NULL,
+    attempts integer NOT NULL,
+    nextattemptat timestamp(6) with time zone,
+    lastattemptat timestamp(6) with time zone,
+    responsestatus integer,
+    error character varying(500),
+    createdat timestamp(6) with time zone NOT NULL,
+    CONSTRAINT webhookdelivery_pkey PRIMARY KEY (id),
+    CONSTRAINT webhookdelivery_webhook FOREIGN KEY (webhookid) REFERENCES projectwebhook (id) ON DELETE CASCADE,
+    CONSTRAINT webhookdelivery_build FOREIGN KEY (buildid) REFERENCES build (id) ON DELETE CASCADE,
+    CONSTRAINT webhookdelivery_status_check CHECK (status IN ('PENDING', 'DELIVERED', 'FAILED')),
+    CONSTRAINT webhookdelivery_event_check CHECK (event IN ('build.passed', 'build.failed', 'build.fixed'))
+);
+CREATE INDEX IF NOT EXISTS webhookdelivery_pending ON webhookdelivery (nextattemptat) WHERE status = 'PENDING';
+CREATE INDEX IF NOT EXISTS webhookdelivery_webhook ON webhookdelivery (webhookid, id DESC);
+CREATE INDEX IF NOT EXISTS webhookdelivery_build ON webhookdelivery (buildid);
+CREATE SEQUENCE IF NOT EXISTS webhookdelivery_seq START WITH 1 INCREMENT BY 50;

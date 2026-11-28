@@ -22,5 +22,6 @@ public enum AuditTargetType {
   NETWORK_TEMPLATE,
   REPORT_PLUGIN,
   ARTICLE,
-  BUILD
+  BUILD,
+  WEBHOOK
 }

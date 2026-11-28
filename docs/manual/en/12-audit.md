@@ -36,6 +36,10 @@ Every event stores a snapshot of the actor, the project and the target, so the e
 | `team.member.role` | A team member's role changes between `MEMBER` and `LEAD`. |
 | `team.member.remove` | A user is removed from a team, including when the user is deleted. |
 | `team.token.update` | A team's repository token is set, rotated or cleared. Only whether it is set (`{"set": true}` or `{"set": false}`) is stored; the token itself is never recorded. |
+| `project.webhook.create` | A webhook is added to a project. The target type is `WEBHOOK`. Details hold the host and the chosen events; the URL path, query and secret are never recorded. |
+| `project.webhook.update` | A webhook's URL or events change. Details name the changed fields. |
+| `project.webhook.secret.rotate` | A webhook's signing secret is replaced. |
+| `project.webhook.delete` | A webhook is removed, together with its delivery history. |
 | `user.create` | A user is created in Keycloak and assigned projects. |
 | `user.update` | A user's profile, role, enabled flag or project assignments change. |
 | `user.password.reset` | An administrator or scoped lead resets a user's temporary password. |

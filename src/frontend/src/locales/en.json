@@ -179,5 +179,44 @@
     "errorRequestFailed": "The request could not be completed.",
     "roleMember": "member",
     "roleLead": "lead"
+  },
+  "webhooks": {
+    "tab": "Webhooks",
+    "title": "Webhooks",
+    "empty": "No webhooks",
+    "loading": "Loading webhooks…",
+    "url": "URL",
+    "urlLabel": "Webhook URL",
+    "add": "Add webhook",
+    "remove": "Remove",
+    "removeNamed": "Remove {{url}}",
+    "rotate": "Rotate secret",
+    "rotateNamed": "Rotate the secret of {{url}}",
+    "rotateConfirm": "Rotate",
+    "retry": "Retry",
+    "events": {
+      "onFinished": "Finished",
+      "onFailed": "Failed",
+      "onFixed": "Fixed"
+    },
+    "deliveries": "Deliveries",
+    "columns": {
+      "time": "Time",
+      "build": "Build",
+      "event": "Event",
+      "status": "Status",
+      "attempts": "Attempts",
+      "response": "Response"
+    },
+    "status": {
+      "PENDING": "pending",
+      "DELIVERED": "delivered",
+      "FAILED": "failed"
+    },
+    "saved": "Webhooks saved.",
+    "saveError": "Unable to save the webhooks.",
+    "rotateError": "Unable to rotate the secret.",
+    "loadError": "Unable to load the webhooks.",
+    "forbidden": "You do not have permission to manage this project's webhooks."
   }
 }

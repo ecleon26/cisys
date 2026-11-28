@@ -183,5 +183,44 @@
     "errorRequestFailed": "تعذر إكمال الطلب.",
     "roleMember": "عضو",
     "roleLead": "قائد"
+  },
+  "webhooks": {
+    "tab": "خطافات الويب",
+    "title": "خطافات الويب",
+    "empty": "لا توجد خطافات ويب",
+    "loading": "جارٍ تحميل خطافات الويب…",
+    "url": "الرابط",
+    "urlLabel": "رابط خطاف الويب",
+    "add": "إضافة خطاف ويب",
+    "remove": "إزالة",
+    "removeNamed": "إزالة {{url}}",
+    "rotate": "تغيير السر",
+    "rotateNamed": "تغيير سر {{url}}",
+    "rotateConfirm": "تغيير",
+    "retry": "إعادة المحاولة",
+    "events": {
+      "onFinished": "انتهى",
+      "onFailed": "فشل",
+      "onFixed": "أُصلح"
+    },
+    "deliveries": "عمليات التسليم",
+    "columns": {
+      "time": "الوقت",
+      "build": "عملية البناء",
+      "event": "الحدث",
+      "status": "الحالة",
+      "attempts": "المحاولات",
+      "response": "الاستجابة"
+    },
+    "status": {
+      "PENDING": "قيد الانتظار",
+      "DELIVERED": "تم التسليم",
+      "FAILED": "فشل"
+    },
+    "saved": "تم حفظ خطافات الويب.",
+    "saveError": "تعذّر حفظ خطافات الويب.",
+    "rotateError": "تعذّر تغيير السر.",
+    "loadError": "تعذّر تحميل خطافات الويب.",
+    "forbidden": "ليست لديك صلاحية لإدارة خطافات الويب لهذا المشروع."
   }
 }

@@ -36,6 +36,7 @@ const TARGETS = [
   "NETWORK_TEMPLATE",
   "ARTICLE",
   "BUILD",
+  "WEBHOOK",
 ];
 
 function outcomeVariant(outcome) {

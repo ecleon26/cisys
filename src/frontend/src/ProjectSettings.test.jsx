@@ -202,6 +202,94 @@ describe("ProjectSettings", () => {
   });
 });
 
+describe("ProjectSettings webhooks", () => {
+  function hooksApi(calls, hooks) {
+    let list = hooks;
+    return vi.fn(async (path, opts = {}) => {
+      const method = opts.method || "GET";
+      calls.push([method, path, opts.body ? JSON.parse(opts.body) : null]);
+      if (path === "/projects/1/webhooks/deliveries") return [];
+      if (path === "/projects/1/webhooks" && method === "GET") return list;
+      if (path === "/projects/1/webhooks" && method === "POST") {
+        const created = {
+          id: 9,
+          url: "https://new.example.com/…",
+          onFinished: false,
+          onFailed: true,
+          onFixed: true,
+          secret: "abc123",
+        };
+        list = [...list, { ...created, secret: undefined }];
+        return created;
+      }
+      if (method === "DELETE") {
+        list = list.filter((w) => !path.endsWith(`/${w.id}`));
+        return null;
+      }
+      return {};
+    });
+  }
+
+  const existing = {
+    id: 3,
+    url: "https://hooks.example.com/…",
+    onFinished: false,
+    onFailed: true,
+    onFixed: false,
+    lastDelivery: { status: "DELIVERED", responseStatus: 200 },
+  };
+
+  it("loads the webhooks when the tab is opened", async () => {
+    const calls = [];
+    renderSettings(hooksApi(calls, [existing]));
+    expect(calls).toHaveLength(0);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Webhooks" }));
+    const url = await screen.findByLabelText("Webhook URL");
+    expect(url.placeholder).toBe("https://hooks.example.com/…");
+    expect(screen.getByText("delivered")).toBeTruthy();
+  });
+
+  it("creates a webhook on Save and shows its secret once", async () => {
+    const calls = [];
+    renderSettings(hooksApi(calls, []));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Webhooks" }));
+    fireEvent.change(await screen.findByLabelText("URL"), {
+      target: { value: "https://new.example.com/hook" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add webhook" }));
+    fireEvent.submit(document.getElementById("project-settings-form"));
+    await screen.findByText("abc123");
+    const post = calls.find(
+      ([m, p]) => m === "POST" && p === "/projects/1/webhooks",
+    );
+    expect(post[2]).toEqual({
+      url: "https://new.example.com/hook",
+      onFinished: false,
+      onFailed: true,
+      onFixed: true,
+    });
+  });
+
+  it("deletes a removed webhook on Save", async () => {
+    const calls = [];
+    renderSettings(hooksApi(calls, [existing]));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Webhooks" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Remove https://hooks.example.com/…",
+      }),
+    );
+    fireEvent.submit(document.getElementById("project-settings-form"));
+    await vi.waitFor(() =>
+      expect(
+        calls.some(
+          ([m, p]) => m === "DELETE" && p === "/projects/1/webhooks/3",
+        ),
+      ).toBe(true),
+    );
+  });
+});
+
 function renderUnified(
   api,
   target = project(),

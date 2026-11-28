@@ -1611,6 +1611,62 @@ body {
   }
 }
 
+/* Project webhooks (settings page) */
+.webhook-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 2fr) auto auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--card-border);
+}
+.members-list .webhook-row:first-child {
+  border-top: 0;
+}
+.webhook-events {
+  display: inline-flex;
+  gap: 0.75rem;
+}
+.webhook-event {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.875rem;
+}
+.webhook-add {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--card-border);
+}
+.webhook-secret {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.webhook-deliveries {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+.webhook-deliveries th,
+.webhook-deliveries td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-top: 1px solid var(--card-border);
+}
+.webhook-response {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 860px) {
+  .webhook-row,
+  .webhook-add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Searchable project picker (Users tab) */
 .project-picker {
   display: grid;

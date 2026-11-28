@@ -24,6 +24,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import ProjectMembers from "./ProjectMembers";
 import { diffMembers, toMap } from "./member-diff";
 import { badgeMarkdown } from "./build-format";
+import WebhooksPanel from "./WebhooksPanel";
+import { body as webhookBody, diffWebhooks, toDraft } from "./webhook-diff";
 
 const USERS_PAGE = 100;
 
@@ -67,6 +69,12 @@ export default function ProjectSettings({
   const [memberLoadError, setMemberLoadError] = useState("");
   // Usernames offered by the Team tab's Add drop-down: the users the Users page lists.
   const [users, setUsers] = useState(null);
+  const [originalHooks, setOriginalHooks] = useState(null);
+  const [draftHooks, setDraftHooks] = useState([]);
+  const [deliveries, setDeliveries] = useState(null);
+  const [hookLoadError, setHookLoadError] = useState("");
+  // Secrets are only returned when created or rotated, so they are shown until the page is left.
+  const [secrets, setSecrets] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -107,6 +115,38 @@ export default function ProjectSettings({
     };
   }, [tab, api, project.id, originalMembers]);
 
+  async function loadHooks() {
+    const [list, recent] = await Promise.all([
+      api(`/projects/${project.id}/webhooks`),
+      api(`/projects/${project.id}/webhooks/deliveries`),
+    ]);
+    const hooks = Array.isArray(list) ? list : [];
+    setOriginalHooks(hooks);
+    setDraftHooks(toDraft(hooks));
+    setDeliveries(Array.isArray(recent) ? recent : []);
+    setHookLoadError("");
+  }
+
+  useEffect(() => {
+    if (tab !== "webhooks" || originalHooks !== null) return;
+    let active = true;
+    loadHooks().catch((e) => {
+      if (!active) return;
+      setOriginalHooks([]);
+      setDraftHooks([]);
+      setHookLoadError(
+        e?.status === 403
+          ? t("webhooks.forbidden")
+          : e?.message || t("webhooks.loadError"),
+      );
+    });
+    return () => {
+      active = false;
+    };
+    // loadHooks only reads props that are already dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, api, project.id, originalHooks]);
+
   // The users that can be added load once, the first time the Team tab is opened.
   useEffect(() => {
     if (tab !== "team" || users !== null) return;
@@ -141,7 +181,11 @@ export default function ProjectSettings({
       ? diffMembers(toMap(originalMembers), draftMembers)
       : null;
   const membersDirty = memberPlan?.changed ?? false;
-  const dirty = repoDirty || teamDirty || membersDirty;
+  const hookPlan = originalHooks
+    ? diffWebhooks(originalHooks, draftHooks)
+    : null;
+  const hooksDirty = hookPlan?.changed ?? false;
+  const dirty = repoDirty || teamDirty || membersDirty || hooksDirty;
 
   // Warn before accidentally leaving with unsaved changes.
   const dirtyRef = React.useRef(dirty);
@@ -274,6 +318,54 @@ export default function ProjectSettings({
     onSaved(saved);
   }
 
+  async function saveHooks(plan) {
+    const created = [];
+    try {
+      for (const w of plan.deletes)
+        await api(`/projects/${project.id}/webhooks/${w.id}`, {
+          method: "DELETE",
+        });
+      for (const row of plan.updates)
+        await api(`/projects/${project.id}/webhooks/${row.id}`, {
+          method: "PUT",
+          body: webhookBody(row),
+        });
+      for (const row of plan.creates) {
+        const saved = await api(`/projects/${project.id}/webhooks`, {
+          method: "POST",
+          body: webhookBody(row),
+        });
+        created.push({ id: saved.id, url: saved.url, secret: saved.secret });
+      }
+      setSuccess(t("webhooks.saved"));
+    } catch (e) {
+      setError(e?.message || t("webhooks.saveError"));
+    }
+    if (created.length) setSecrets((prev) => [...prev, ...created]);
+    try {
+      await loadHooks();
+    } catch {
+      // Keep the draft when the list cannot be refreshed.
+    }
+  }
+
+  async function rotateSecret(row) {
+    setError("");
+    setSuccess("");
+    try {
+      const saved = await api(
+        `/projects/${project.id}/webhooks/${row.id}/secret`,
+        { method: "POST" },
+      );
+      setSecrets((prev) => [
+        ...prev.filter((s) => s.id !== saved.id),
+        { id: saved.id, url: saved.url, secret: saved.secret },
+      ]);
+    } catch (e) {
+      setError(e?.message || t("webhooks.rotateError"));
+    }
+  }
+
   async function submit(event) {
     event?.preventDefault();
     if (busy || !dirty) return;
@@ -306,6 +398,11 @@ export default function ProjectSettings({
       } finally {
         setBusy(false);
       }
+      return;
+    }
+    if (tab === "webhooks") {
+      if (hookPlan) await saveHooks(hookPlan);
+      setBusy(false);
       return;
     }
     const plan =
@@ -371,6 +468,11 @@ export default function ProjectSettings({
       setError("");
       return;
     }
+    if (tab === "webhooks") {
+      setDraftHooks(toDraft(originalHooks));
+      setError("");
+      return;
+    }
     if (originalMembers) setDraftMembers(toMap(originalMembers));
     setError("");
   }
@@ -380,7 +482,9 @@ export default function ProjectSettings({
       ? repoDirty || teamDirty
       : tab === "team"
         ? membersDirty
-        : false;
+        : tab === "webhooks"
+          ? hooksDirty
+          : false;
 
   return (
     <main className="page-container">
@@ -429,6 +533,7 @@ export default function ProjectSettings({
         <TabsList>
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">{t("projects.team")}</TabsTrigger>
+          <TabsTrigger value="webhooks">{t("webhooks.tab")}</TabsTrigger>
         </TabsList>
         <TabsContent
           value="general"
@@ -573,6 +678,29 @@ export default function ProjectSettings({
             loadError={memberLoadError}
             user={user}
             isAdmin={isAdmin}
+            busy={busy}
+          />
+        </TabsContent>
+        <TabsContent
+          value="webhooks"
+          forceMount
+          className="data-[state=inactive]:hidden"
+        >
+          <WebhooksPanel
+            original={originalHooks}
+            draft={draftHooks}
+            deliveries={deliveries}
+            secrets={secrets}
+            onDraftChange={(next) => {
+              setSuccess("");
+              setDraftHooks(next);
+            }}
+            onRotate={rotateSecret}
+            onRetry={() => {
+              setOriginalHooks(null);
+              setHookLoadError("");
+            }}
+            loadError={hookLoadError}
             busy={busy}
           />
         </TabsContent>
