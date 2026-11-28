@@ -187,9 +187,9 @@ describe("ProjectSettings", () => {
     expect(screen.getByLabelText("Private project").disabled).toBe(true);
   });
 
-  it("lets a lead make a public project private", () => {
+  it("does not let a lead make a public project private", () => {
     renderSettings(vi.fn(async () => []));
-    expect(screen.getByLabelText("Private project").disabled).toBe(false);
+    expect(screen.getByLabelText("Private project").disabled).toBe(true);
   });
 
   it("lets an admin make a private project public", () => {
@@ -581,24 +581,12 @@ describe("ProjectSettings team assignment", () => {
     );
   });
 
-  it("lets a LEAD make a private project public", async () => {
-    const calls = [];
-    renderUnified(apiMock(calls, led), {
+  it("does not let a LEAD make a private project public", () => {
+    renderUnified(apiMock([], led), {
       ...project(),
       privateRepository: true,
     });
-    const checkbox = screen.getByLabelText("Private project");
-    expect(checkbox.disabled).toBe(false);
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await vi.waitFor(() =>
-      expect(calls).toContainEqual([
-        "PUT",
-        "/projects/1",
-        expect.objectContaining({ privateRepository: false }),
-      ]),
-    );
+    expect(screen.getByLabelText("Private project").disabled).toBe(true);
   });
 
   it("leaves the private switch enabled for an admin", () => {
@@ -611,13 +599,9 @@ describe("ProjectSettings team assignment", () => {
     expect(screen.getByLabelText("Private project").disabled).toBe(false);
   });
 
-  it("lets a LEAD make a public project private", () => {
+  it("does not let a LEAD make a public project private", () => {
     renderUnified(apiMock([], led), project());
-    const checkbox = screen.getByLabelText("Private project");
-    expect(checkbox.disabled).toBe(false);
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(true);
-    expect(document.getElementById("settings-team")).toBeTruthy();
+    expect(screen.getByLabelText("Private project").disabled).toBe(true);
   });
 });
 

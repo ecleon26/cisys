@@ -828,7 +828,7 @@ class ProjectResourceTest {
                 + name
                 + "\",\"repositoryUrl\":\""
                 + updatedUrl
-                + "\",\"privateRepository\":true}")
+                + "\",\"privateRepository\":false}")
         .when()
         .put("/api/projects/" + id)
         .then()
@@ -839,7 +839,7 @@ class ProjectResourceTest {
             "repositoryUrl",
             equalTo(RepositoryUrls.normalize(updatedUrl)),
             "privateRepository",
-            equalTo(true));
+            equalTo(false));
   }
 
   @Test
@@ -885,6 +885,28 @@ class ProjectResourceTest {
         .statusCode(403);
     QuarkusTransaction.requiringNew()
         .run(() -> assertTrue(Project.<Project>findById(id).privateRepository));
+  }
+
+  @Test
+  @TestSecurity(user = "lead", roles = "lead")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
+  void leadCannotMakeAPublicProjectPrivate() {
+    Long id = project("lead-id", false);
+    String url = "https://github.com/org/lead-private-" + java.util.UUID.randomUUID() + ".git";
+    given()
+        .contentType("application/json")
+        .body(
+            "{\"name\":\"lead-private-"
+                + id
+                + "\",\"repositoryUrl\":\""
+                + url
+                + "\",\"privateRepository\":true}")
+        .when()
+        .put("/api/projects/" + id)
+        .then()
+        .statusCode(403);
+    QuarkusTransaction.requiringNew()
+        .run(() -> assertFalse(Project.<Project>findById(id).privateRepository));
   }
 
   @Test
@@ -978,9 +1000,9 @@ class ProjectResourceTest {
   }
 
   @Test
-  @TestSecurity(user = "lead", roles = "lead")
-  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
-  void leadMakesOwnPrivateProjectPublicAndClearsTheCredential() {
+  @TestSecurity(user = "admin", roles = "admin")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "admin-id")})
+  void adminMakesAPrivateProjectPublicAndClearsTheCredential() {
     Long id = project("lead-id", true);
     QuarkusTransaction.requiringNew()
         .run(() -> Project.<Project>findById(id).credentialRef = "CISYS_GIT_TEST");
@@ -1001,15 +1023,15 @@ class ProjectResourceTest {
     QuarkusTransaction.requiringNew()
         .run(() -> {
           Project p = Project.findById(id);
-          assertFalse(p.privateRepository, "a project LEAD may make the project public");
+          assertFalse(p.privateRepository, "an admin may make the project public");
           assertNull(p.credentialRef, "making the project public clears the credential");
         });
   }
 
   @Test
-  @TestSecurity(user = "lead", roles = "lead")
-  @JwtSecurity(claims = {@Claim(key = "sub", value = "lead-id")})
-  void aLeadTogglingVisibilityStopsAndRestoresTheTeamToken() {
+  @TestSecurity(user = "admin", roles = "admin")
+  @JwtSecurity(claims = {@Claim(key = "sub", value = "admin-id")})
+  void anAdminTogglingVisibilityStopsAndRestoresTheTeamToken() {
     Long id = project("lead-id", true);
     Long team = team("other-lead-id", null, null);
     attachTeam(id, team, false);
@@ -1034,7 +1056,7 @@ class ProjectResourceTest {
         .put("/api/projects/" + id)
         .then()
         .statusCode(200);
-    assertNull(resolvedToken(id), "a project made public by a LEAD never uses its team's token");
+    assertNull(resolvedToken(id), "a public project never uses its team's token");
 
     given()
         .contentType("application/json")
@@ -1090,7 +1112,7 @@ class ProjectResourceTest {
                   + updatedName
                   + "\",\"repositoryUrl\":\""
                   + updatedUrl
-                  + "\",\"privateRepository\":true}")
+                  + "\",\"privateRepository\":false}")
           .when()
           .put("/api/projects/" + id)
           .then()

@@ -609,8 +609,8 @@ public class ProjectResource {
     if (!admin && input.credentialRef() != null && !input.credentialRef().isBlank()) {
       throw new ForbiddenException();
     }
-    // Making a private project public exposes its builds and logs to everyone.
-    if (!admin && previousPrivate && !input.privateRepository()) {
+    // Only global admins decide who can see a project and its build logs.
+    if (!admin && input.privateRepository() != previousPrivate) {
       throw new ForbiddenException();
     }
     // A lead must not carry the admin-set credential to a new repository.

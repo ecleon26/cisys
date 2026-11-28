@@ -499,7 +499,7 @@ export default function ProjectSettings({
                       id="settings-private"
                       type="checkbox"
                       checked={priv}
-                      disabled={!isAdmin && repoSnapshot.privateRepository}
+                      disabled={!isAdmin}
                       onChange={(e) => setPriv(e.target.checked)}
                     />
                   </span>
